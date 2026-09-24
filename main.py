@@ -58,8 +58,8 @@ app.secret_key = SECRET_KEY
 app.config.update(
     SESSION_COOKIE_NAME="sarika_admin_session",
     SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=False,
+    SESSION_COOKIE_SAMESITE="None",
+    SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_PATH="/",
     PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 7,
     SESSION_COOKIE_DOMAIN=None,
@@ -80,9 +80,14 @@ ALLOWED_ORIGINS = [
     "http://10.101.222.75:5173",
     "http://10.101.222.75:5174",
     "https://sarika-fashions-frontend.vercel.app",
-    "https://sarika-fashions-frontend-git-main-popx-s-projects.vercel.app",
-    "https://sarika-fashions-frontend-nh7zypm7g-popx-s-projects.vercel.app",
 ]
+
+# Optional: add another frontend origin through Render environment variables.
+# Example: FRONTEND_URL=https://your-other-vercel-deployment.vercel.app
+FRONTEND_URL = os.getenv("FRONTEND_URL", "").strip().rstrip("/")
+
+if FRONTEND_URL and FRONTEND_URL not in ALLOWED_ORIGINS:
+    ALLOWED_ORIGINS.append(FRONTEND_URL)
 
 CORS(
     app,
