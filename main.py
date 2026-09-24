@@ -73,24 +73,22 @@ app.config.update(
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-
     "http://localhost:5174",
     "http://127.0.0.1:5174",
-
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-
     "http://10.101.222.75:5173",
     "http://10.101.222.75:5174",
+    "https://sarika-fashions-frontend.vercel.app",
+    "https://sarika-fashions-frontend-git-main-popx-s-projects.vercel.app",
+    "https://sarika-fashions-frontend-nh7zypm7g-popx-s-projects.vercel.app",
 ]
-
 
 CORS(
     app,
     supports_credentials=True,
     origins=ALLOWED_ORIGINS,
 )
-
 
 # ============================================================
 # CLOUDINARY
