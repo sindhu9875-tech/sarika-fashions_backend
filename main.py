@@ -1925,6 +1925,688 @@ def verify_payment():
 
 
 # ============================================================
+# COMPLETE RAZORPAY PAYMENT + CREATE CUSTOMER ORDER
+# ============================================================
+#
+# This endpoint is intentionally placed before /api/orders.
+#
+# Flow:
+# 1. Verify Razorpay signature.
+# 2. Fetch the payment from Razorpay.
+# 3. Require payment status = captured.
+# 4. Confirm the payment belongs to the Razorpay order.
+# 5. Confirm the Razorpay amount matches the checkout total.
+# 6. Create the customer order in MySQL.
+#
+# This prevents the frontend from simply telling the backend
+# that a payment was "Paid" without backend verification.
+# ============================================================
+
+@app.route(
+    "/api/payment/complete",
+    methods=["POST"]
+)
+def complete_payment_and_create_order():
+
+    conn = None
+    cur = None
+
+    try:
+
+        if not razorpay_client:
+
+            return jsonify({
+                "success": False,
+                "message": "Razorpay is not configured",
+            }), 500
+
+
+        data = (
+            request.get_json(
+                silent=True
+            )
+            or {}
+        )
+
+
+        razorpay_order_id = str(
+            data.get(
+                "razorpay_order_id",
+                ""
+            )
+        ).strip()
+
+        razorpay_payment_id = str(
+            data.get(
+                "razorpay_payment_id",
+                ""
+            )
+        ).strip()
+
+        razorpay_signature = str(
+            data.get(
+                "razorpay_signature",
+                ""
+            )
+        ).strip()
+
+
+        if not razorpay_order_id:
+            return jsonify({
+                "success": False,
+                "message": "Razorpay order ID is missing",
+            }), 400
+
+
+        if not razorpay_payment_id:
+            return jsonify({
+                "success": False,
+                "message": "Razorpay payment ID is missing",
+            }), 400
+
+
+        if not razorpay_signature:
+            return jsonify({
+                "success": False,
+                "message": "Razorpay signature is missing",
+            }), 400
+
+
+        # --------------------------------------------------------
+        # 1. VERIFY RAZORPAY SIGNATURE
+        # --------------------------------------------------------
+
+        razorpay_client.utility.verify_payment_signature({
+
+            "razorpay_order_id":
+                razorpay_order_id,
+
+            "razorpay_payment_id":
+                razorpay_payment_id,
+
+            "razorpay_signature":
+                razorpay_signature,
+
+        })
+
+
+        # --------------------------------------------------------
+        # 2. FETCH PAYMENT DIRECTLY FROM RAZORPAY
+        # --------------------------------------------------------
+
+        payment = (
+            razorpay_client.payment.fetch(
+                razorpay_payment_id
+            )
+        )
+
+
+        payment_status = str(
+            payment.get(
+                "status",
+                ""
+            )
+        ).lower()
+
+
+        print(
+            "💳 RAZORPAY PAYMENT:",
+            razorpay_payment_id,
+            "STATUS:",
+            payment_status
+        )
+
+
+        # --------------------------------------------------------
+        # 3. PAYMENT MUST BE CAPTURED
+        # --------------------------------------------------------
+
+        if payment_status != "captured":
+
+            return jsonify({
+                "success": False,
+                "message":
+                    "Payment has not been captured yet",
+                "payment_status":
+                    payment_status,
+            }), 400
+
+
+        # --------------------------------------------------------
+        # 4. PAYMENT MUST BELONG TO THIS RAZORPAY ORDER
+        # --------------------------------------------------------
+
+        payment_order_id = str(
+            payment.get(
+                "order_id",
+                ""
+            )
+        ).strip()
+
+
+        if payment_order_id != razorpay_order_id:
+
+            return jsonify({
+                "success": False,
+                "message":
+                    "Payment does not match the Razorpay order",
+            }), 400
+
+
+        # --------------------------------------------------------
+        # 5. FETCH RAZORPAY ORDER
+        # --------------------------------------------------------
+
+        razorpay_order = (
+            razorpay_client.order.fetch(
+                razorpay_order_id
+            )
+        )
+
+
+        razorpay_amount = int(
+            razorpay_order.get(
+                "amount",
+                0
+            )
+        )
+
+
+        # Frontend total is in rupees.
+        # Razorpay amount is in paise.
+        try:
+
+            requested_total = float(
+                data.get(
+                    "total_amount",
+                    0
+                )
+            )
+
+        except Exception:
+
+            requested_total = 0
+
+
+        requested_amount_paise = int(
+            round(
+                requested_total * 100
+            )
+        )
+
+
+        if (
+            requested_amount_paise <= 0
+            or
+            razorpay_amount != requested_amount_paise
+        ):
+
+            print(
+                "❌ AMOUNT MISMATCH:",
+                "Razorpay:",
+                razorpay_amount,
+                "Requested:",
+                requested_amount_paise
+            )
+
+            return jsonify({
+                "success": False,
+                "message":
+                    "Payment amount does not match the order amount",
+            }), 400
+
+
+        # --------------------------------------------------------
+        # 6. PREVENT DUPLICATE ORDERS
+        # --------------------------------------------------------
+
+        conn = get_db_connection()
+
+        cur = conn.cursor(
+            dictionary=True
+        )
+
+
+        cur.execute(
+            """
+            SELECT
+                id,
+                order_number,
+                customer_access_token,
+                payment_status,
+                order_status
+            FROM orders
+            WHERE razorpay_payment_id = %s
+            LIMIT 1
+            """,
+            (
+                razorpay_payment_id,
+            )
+        )
+
+
+        existing_order = cur.fetchone()
+
+
+        if existing_order:
+
+            existing_token = (
+                existing_order.get(
+                    "customer_access_token"
+                )
+            )
+
+
+            if existing_token:
+
+                session[
+                    "customer_order_token"
+                ] = existing_token
+
+                session.permanent = True
+
+
+            return jsonify({
+
+                "success": True,
+
+                "message":
+                    "Order already exists",
+
+                "order_id":
+                    existing_order["id"],
+
+                "order_number":
+                    existing_order["order_number"],
+
+                "payment_status":
+                    existing_order["payment_status"],
+
+                "order_status":
+                    existing_order["order_status"],
+
+            }), 200
+
+
+        # --------------------------------------------------------
+        # 7. CUSTOMER SESSION TOKEN
+        # --------------------------------------------------------
+
+        customer_token = (
+            get_customer_order_token()
+        )
+
+
+        if not customer_token:
+
+            customer_token = (
+                create_customer_order_token()
+            )
+
+
+        # --------------------------------------------------------
+        # 8. READ CUSTOMER DATA
+        # --------------------------------------------------------
+
+        customer_name = str(
+            data.get(
+                "customer_name",
+                ""
+            )
+        ).strip()
+
+
+        customer_email = str(
+            data.get(
+                "customer_email",
+                ""
+            )
+        ).strip()
+
+
+        customer_phone = str(
+            data.get(
+                "customer_phone",
+                ""
+            )
+        ).strip()
+
+
+        address = str(
+            data.get(
+                "address",
+                ""
+            )
+        ).strip()
+
+
+        address_line = str(
+            data.get(
+                "address_line",
+                address
+            )
+        ).strip()
+
+
+        city = str(
+            data.get(
+                "city",
+                ""
+            )
+        ).strip()
+
+
+        state = str(
+            data.get(
+                "state",
+                ""
+            )
+        ).strip()
+
+
+        pincode = str(
+            data.get(
+                "pincode",
+                ""
+            )
+        ).strip()
+
+
+        items = data.get(
+            "items",
+            []
+        )
+
+
+        try:
+
+            total_amount = float(
+                data.get(
+                    "total_amount",
+                    0
+                )
+            )
+
+        except Exception:
+
+            total_amount = 0
+
+
+        # --------------------------------------------------------
+        # 9. VALIDATE CUSTOMER DATA
+        # --------------------------------------------------------
+
+        if not customer_name:
+
+            return jsonify({
+                "success": False,
+                "message":
+                    "Customer name is required",
+            }), 400
+
+
+        if not customer_phone:
+
+            return jsonify({
+                "success": False,
+                "message":
+                    "Customer phone is required",
+            }), 400
+
+
+        if not address:
+
+            return jsonify({
+                "success": False,
+                "message":
+                    "Address is required",
+            }), 400
+
+
+        if not city:
+
+            return jsonify({
+                "success": False,
+                "message":
+                    "City is required",
+            }), 400
+
+
+        if not state:
+
+            return jsonify({
+                "success": False,
+                "message":
+                    "State is required",
+            }), 400
+
+
+        if not pincode:
+
+            return jsonify({
+                "success": False,
+                "message":
+                    "Pincode is required",
+            }), 400
+
+
+        if not items:
+
+            return jsonify({
+                "success": False,
+                "message":
+                    "Order must contain at least one item",
+            }), 400
+
+
+        if total_amount <= 0:
+
+            return jsonify({
+                "success": False,
+                "message":
+                    "Invalid order amount",
+            }), 400
+
+
+        # --------------------------------------------------------
+        # 10. GENERATE ORDER NUMBER
+        # --------------------------------------------------------
+
+        cur.execute(
+            """
+            SELECT order_number
+            FROM orders
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        )
+
+
+        last = cur.fetchone()
+
+
+        next_num = 1
+
+
+        if last and last.get(
+            "order_number"
+        ):
+
+            try:
+
+                next_num = (
+                    int(
+                        str(
+                            last[
+                                "order_number"
+                            ]
+                        ).replace(
+                            "SF-",
+                            ""
+                        )
+                    )
+                    + 1
+                )
+
+            except Exception:
+
+                next_num = 1
+
+
+        order_number = (
+            f"SF-{next_num:05d}"
+        )
+
+
+        # --------------------------------------------------------
+        # 11. CREATE ORDER
+        # --------------------------------------------------------
+
+        cur.execute(
+            """
+            INSERT INTO orders (
+
+                order_number,
+                customer_name,
+                customer_email,
+                customer_phone,
+                address,
+                address_line,
+                city,
+                state,
+                pincode,
+                items,
+                total_amount,
+                razorpay_order_id,
+                razorpay_payment_id,
+                payment_status,
+                order_status,
+                customer_access_token
+
+            )
+
+            VALUES (
+
+                %s,%s,%s,%s,%s,
+                %s,%s,%s,%s,%s,
+                %s,%s,%s,%s,%s,
+                %s
+
+            )
+            """,
+            (
+
+                order_number,
+                customer_name,
+                customer_email,
+                customer_phone,
+                address,
+                address_line,
+                city,
+                state,
+                pincode,
+                json.dumps(items),
+                total_amount,
+                razorpay_order_id,
+                razorpay_payment_id,
+                "Paid",
+                "Placed",
+                customer_token,
+
+            )
+        )
+
+
+        order_id = cur.lastrowid
+
+
+        conn.commit()
+
+
+        # --------------------------------------------------------
+        # 12. SAVE CUSTOMER TOKEN FOR MY ORDERS
+        # --------------------------------------------------------
+
+        session[
+            "customer_order_token"
+        ] = customer_token
+
+        session.permanent = True
+
+
+        print(
+            "✅ PAYMENT VERIFIED + ORDER CREATED:",
+            order_number,
+            "| PAYMENT:",
+            razorpay_payment_id
+        )
+
+
+        return jsonify({
+
+            "success": True,
+
+            "message":
+                "Payment verified and order created successfully",
+
+            "order_id":
+                order_id,
+
+            "order_number":
+                order_number,
+
+            "payment_status":
+                "Paid",
+
+            "order_status":
+                "Placed",
+
+        }), 201
+
+
+    except Exception as e:
+
+        if conn:
+
+            conn.rollback()
+
+
+        print(
+            "❌ PAYMENT COMPLETE ERROR:",
+            e
+        )
+
+
+        import traceback
+
+        traceback.print_exc()
+
+
+        return jsonify({
+
+            "success": False,
+
+            "message":
+                "Payment was received, but the order could not be completed",
+
+            "error":
+                str(e),
+
+        }), 500
+
+
+    finally:
+
+        if cur:
+
+            cur.close()
+
+        if conn:
+
+            conn.close()
+
+
+# ============================================================
 # CREATE CUSTOMER ORDER
 # ============================================================
 
