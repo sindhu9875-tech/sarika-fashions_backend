@@ -305,6 +305,10 @@ def create_tables():
 
                 items JSON NOT NULL,
 
+                subtotal DECIMAL(10,2) NULL,
+
+                shipping DECIMAL(10,2) NULL,
+
                 total_amount DECIMAL(10,2) NOT NULL,
 
                 razorpay_order_id VARCHAR(100),
@@ -337,6 +341,44 @@ def create_tables():
 
             )
         """)
+
+        # ----------------------------------------------------
+        # ADD SUBTOTAL TO OLD ORDERS
+        # ----------------------------------------------------
+
+        cur.execute("""
+            SHOW COLUMNS FROM orders
+            LIKE 'subtotal'
+        """)
+
+        subtotal_column = cur.fetchone()
+
+        if not subtotal_column:
+            print("➕ Adding subtotal column...")
+            cur.execute("""
+                ALTER TABLE orders
+                ADD COLUMN subtotal DECIMAL(10,2) NULL
+            """)
+            print("✅ subtotal added")
+
+        # ----------------------------------------------------
+        # ADD SHIPPING TO OLD ORDERS
+        # ----------------------------------------------------
+
+        cur.execute("""
+            SHOW COLUMNS FROM orders
+            LIKE 'shipping'
+        """)
+
+        shipping_column = cur.fetchone()
+
+        if not shipping_column:
+            print("➕ Adding shipping column...")
+            cur.execute("""
+                ALTER TABLE orders
+                ADD COLUMN shipping DECIMAL(10,2) NULL
+            """)
+            print("✅ shipping added")
 
         # ----------------------------------------------------
         # ADD CUSTOMER TOKEN TO OLD ORDERS
@@ -701,7 +743,8 @@ def admin_login():
         }), 401
 
 
-    session.clear()
+    session.pop("admin_logged_in", None)
+    session.pop("admin_email", None)
 
     session["admin_logged_in"] = True
     session["admin_email"] = ADMIN_EMAIL
@@ -810,7 +853,8 @@ def admin_logout():
         )
     )
 
-    session.clear()
+    session.pop("admin_logged_in", None)
+    session.pop("admin_email", None)
 
     return jsonify({
 
@@ -2320,6 +2364,34 @@ def complete_payment_and_create_order():
 
         try:
 
+            subtotal = float(
+                data.get(
+                    "subtotal",
+                    0
+                )
+            )
+
+        except Exception:
+
+            subtotal = 0
+
+
+        try:
+
+            shipping = float(
+                data.get(
+                    "shipping",
+                    0
+                )
+            )
+
+        except Exception:
+
+            shipping = 0
+
+
+        try:
+
             total_amount = float(
                 data.get(
                     "total_amount",
@@ -2476,6 +2548,8 @@ def complete_payment_and_create_order():
                 state,
                 pincode,
                 items,
+                subtotal,
+                shipping,
                 total_amount,
                 razorpay_order_id,
                 razorpay_payment_id,
@@ -2506,10 +2580,12 @@ def complete_payment_and_create_order():
                 state,
                 pincode,
                 json.dumps(items),
+                subtotal,
+                shipping,
                 total_amount,
                 razorpay_order_id,
                 razorpay_payment_id,
-                "Paid",
+                "Captured",
                 "Placed",
                 customer_token,
 
@@ -2534,12 +2610,13 @@ def complete_payment_and_create_order():
         session.permanent = True
 
 
-        print(
-            "✅ PAYMENT VERIFIED + ORDER CREATED:",
-            order_number,
-            "| PAYMENT:",
-            razorpay_payment_id
-        )
+        print("======================================")
+        print("✅ PAYMENT VERIFIED + ORDER CREATED")
+        print("Order:", order_number)
+        print("Customer token exists:", bool(customer_token))
+        print("Session token exists:", bool(session.get("customer_order_token")))
+        print("Session permanent:", session.permanent)
+        print("======================================")
 
 
         return jsonify({
@@ -2556,10 +2633,25 @@ def complete_payment_and_create_order():
                 order_number,
 
             "payment_status":
-                "Paid",
+                "Captured",
 
             "order_status":
                 "Placed",
+
+            "customer_order_session":
+                True,
+
+            "customer_order_token":
+                customer_token,
+
+            "subtotal":
+                subtotal,
+
+            "shipping":
+                shipping,
+
+            "total_amount":
+                total_amount,
 
         }), 201
 
@@ -2992,36 +3084,25 @@ def get_my_orders():
 
     try:
 
-        customer_token = (
-            get_customer_order_token()
-        )
+        customer_token = get_customer_order_token()
 
+        print("\n======================================")
+        print("🛍️ MY ORDERS REQUEST")
+        print("Customer token exists:", bool(customer_token))
+        print("Session permanent:", session.permanent)
+        print("======================================")
 
         if not customer_token:
-
+            print("❌ NO CUSTOMER ORDER SESSION")
             return jsonify({
-
-                "success":
-                    True,
-
-                "authenticated":
-                    False,
-
-                "orders":
-                    [],
-
-                "message":
-                    "No customer order session found",
-
-            })
-
+                "success": True,
+                "authenticated": False,
+                "orders": [],
+                "message": "Customer order session not found",
+            }), 200
 
         conn = get_db_connection()
-
-        cur = conn.cursor(
-            dictionary=True
-        )
-
+        cur = conn.cursor(dictionary=True)
 
         cur.execute(
             """
@@ -3033,46 +3114,25 @@ def get_my_orders():
             (customer_token,)
         )
 
-
         orders = cur.fetchall()
 
-
-        # ----------------------------------------------------
-        # LOAD RETURN REQUESTS
-        # ----------------------------------------------------
-
         order_ids = [
-            order["id"]
-            for order in orders
+            order["id"] for order in orders
+            if order.get("id") is not None
         ]
-
 
         return_requests_by_order = {}
 
-
         if order_ids:
-
-            placeholders = ",".join(
-                ["%s"] * len(order_ids)
-            )
-
+            placeholders = ",".join(["%s"] * len(order_ids))
 
             cur.execute(
                 f"""
                 SELECT
-                    id,
-                    order_id,
-                    order_number,
-                    product_id,
-                    product_name,
-                    quantity,
-                    reason,
-                    description,
-                    return_status,
-                    refund_status,
-                    admin_note,
-                    requested_at,
-                    updated_at
+                    id, order_id, order_number, product_id,
+                    product_name, quantity, reason, description,
+                    return_status, refund_status, admin_note,
+                    requested_at, updated_at
                 FROM return_requests
                 WHERE order_id IN ({placeholders})
                 ORDER BY requested_at DESC
@@ -3080,190 +3140,110 @@ def get_my_orders():
                 tuple(order_ids)
             )
 
-
-            return_rows = cur.fetchall()
-
-
-            for return_item in return_rows:
-
-                if return_item.get(
-                    "requested_at"
-                ):
-
-                    return_item[
-                        "requested_at"
-                    ] = (
-                        return_item[
-                            "requested_at"
-                        ].isoformat()
-                    )
-
-
-                if return_item.get(
-                    "updated_at"
-                ):
-
-                    return_item[
-                        "updated_at"
-                    ] = (
-                        return_item[
-                            "updated_at"
-                        ].isoformat()
-                    )
-
-
-                order_id = (
-                    return_item["order_id"]
-                )
-
+            for return_item in cur.fetchall():
+                if return_item.get("requested_at"):
+                    return_item["requested_at"] = return_item["requested_at"].isoformat()
+                if return_item.get("updated_at"):
+                    return_item["updated_at"] = return_item["updated_at"].isoformat()
 
                 return_requests_by_order.setdefault(
-                    order_id,
-                    []
-                ).append(
-                    return_item
-                )
+                    return_item["order_id"], []
+                ).append(return_item)
 
-
-        # ----------------------------------------------------
-        # FORMAT ORDERS
-        # ----------------------------------------------------
+        datetime_fields = [
+            "created_at", "confirmed_at", "shipped_at",
+            "out_for_delivery_at", "delivered_at", "received_at"
+        ]
 
         for order in orders:
-
-            datetime_fields = [
-                "created_at",
-                "confirmed_at",
-                "shipped_at",
-                "out_for_delivery_at",
-                "delivered_at",
-                "received_at",
-            ]
-
             for field in datetime_fields:
-
                 if order.get(field):
+                    order[field] = order[field].isoformat()
 
-                    order[field] = (
-                        order[field]
-                        .isoformat()
-                    )
+            order["customer_received"] = bool(order.get("customer_received", 0))
 
+            if isinstance(order.get("items"), str):
+                try:
+                    order["items"] = json.loads(order["items"])
+                except Exception:
+                    order["items"] = []
 
-            order[
-                "customer_received"
-            ] = bool(
-                order.get(
-                    "customer_received",
+            if not isinstance(order.get("items"), list):
+                order["items"] = []
+
+            if order.get("subtotal") is not None:
+                order["subtotal"] = float(order["subtotal"])
+
+            if order.get("shipping") is not None:
+                order["shipping"] = float(order["shipping"])
+
+            order["total_amount"] = float(order.get("total_amount") or 0)
+
+            if order.get("shipping") is None:
+                order["shipping"] = 0
+
+            if order.get("subtotal") is None:
+                order["subtotal"] = max(
+                    order["total_amount"] - order["shipping"],
                     0
                 )
+
+            order["total"] = order["total_amount"]
+
+            order["return_requests"] = return_requests_by_order.get(
+                order["id"], []
             )
 
+            order.pop("customer_access_token", None)
 
-            if isinstance(
-                order.get("items"),
-                str
-            ):
-
-                try:
-
-                    order[
-                        "items"
-                    ] = json.loads(
-                        order[
-                            "items"
-                        ]
-                    )
-
-                except Exception:
-
-                    order[
-                        "items"
-                    ] = []
-
-
-            order[
-                "total_amount"
-            ] = float(
-                order.get(
-                    "total_amount"
-                ) or 0
+        print("======================================")
+        print("✅ MY ORDERS FOUND:", len(orders))
+        for order in orders:
+            print(
+                order.get("order_number"),
+                "|", order.get("order_status"),
+                "|", order.get("payment_status")
             )
-
-
-            order[
-                "total"
-            ] = order[
-                "total_amount"
-            ]
-
-
-            order[
-                "return_requests"
-            ] = return_requests_by_order.get(
-                order["id"],
-                []
-            )
-
-
-            order.pop(
-                "customer_access_token",
-                None
-            )
-
-
-        print(
-            f"✅ MY ORDERS: {len(orders)} orders found"
-        )
-
+        print("======================================")
 
         return jsonify({
-
-            "success":
-                True,
-
-            "authenticated":
-                True,
-
-            "orders":
-                orders,
-
-        })
-
+            "success": True,
+            "authenticated": True,
+            "orders": orders,
+        }), 200
 
     except Exception as e:
-
-        print(
-            "❌ MY ORDERS ERROR:",
-            e
-        )
-
+        print("❌ MY ORDERS ERROR:", repr(e))
         import traceback
-
         traceback.print_exc()
 
-
         return jsonify({
-
-            "success":
-                False,
-
-            "message":
-                "Failed to fetch your orders",
-
-            "error":
-                str(e),
-
+            "success": False,
+            "authenticated": False,
+            "orders": [],
+            "message": "Failed to fetch your orders",
+            "error": str(e),
         }), 500
 
-
     finally:
-
         if cur:
             cur.close()
-
         if conn:
             conn.close()
+
+
+# ============================================================
+# CUSTOMER ORDER SESSION STATUS
+# ============================================================
+
+@app.route("/api/my-orders/session", methods=["GET"])
+def my_orders_session_status():
+    token = get_customer_order_token()
+    return jsonify({
+        "success": True,
+        "authenticated": bool(token),
+        "has_customer_order_session": bool(token),
+    }), 200
 
 
 # ============================================================
