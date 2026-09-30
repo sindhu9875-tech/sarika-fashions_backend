@@ -1,3 +1,4 @@
+
 import os
 import json
 import secrets
@@ -51,16 +52,16 @@ app.secret_key = SECRET_KEY
 
 
 # ============================================================
-# SESSION CONFIGURATION - PRODUCTION/VERCEL
+# SESSION CONFIGURATION
 # ============================================================
 
 app.config.update(
-    SESSION_COOKIE_NAME="sarika_customer_session",
+    SESSION_COOKIE_NAME="sarika_admin_session",
     SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SAMESITE="None",
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_PATH="/",
-    PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 30,  # 30 days
+    PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 7,
     SESSION_COOKIE_DOMAIN=None,
 )
 
@@ -243,8 +244,6 @@ def create_customer_order_token():
     session["customer_order_token"] = token
 
     session.permanent = True
-
-    session.modified = True
 
     return token
 
@@ -751,8 +750,6 @@ def admin_login():
     session["admin_email"] = ADMIN_EMAIL
 
     session.permanent = True
-
-    session.modified = True
 
 
     print(
@@ -1974,6 +1971,20 @@ def verify_payment():
 # ============================================================
 # COMPLETE RAZORPAY PAYMENT + CREATE CUSTOMER ORDER
 # ============================================================
+#
+# This endpoint is intentionally placed before /api/orders.
+#
+# Flow:
+# 1. Verify Razorpay signature.
+# 2. Fetch the payment from Razorpay.
+# 3. Require payment status = captured.
+# 4. Confirm the payment belongs to the Razorpay order.
+# 5. Confirm the Razorpay amount matches the checkout total.
+# 6. Create the customer order in MySQL.
+#
+# This prevents the frontend from simply telling the backend
+# that a payment was "Paid" without backend verification.
+# ============================================================
 
 @app.route(
     "/api/payment/complete",
@@ -2237,8 +2248,6 @@ def complete_payment_and_create_order():
                 ] = existing_token
 
                 session.permanent = True
-
-                session.modified = True
 
 
             return jsonify({
@@ -2555,7 +2564,7 @@ def complete_payment_and_create_order():
                 %s,%s,%s,%s,%s,
                 %s,%s,%s,%s,%s,
                 %s,%s,%s,%s,%s,
-                %s,%s,%s
+                %s
 
             )
             """,
@@ -2600,8 +2609,6 @@ def complete_payment_and_create_order():
 
         session.permanent = True
 
-        session.modified = True
-
 
         print("======================================")
         print("✅ PAYMENT VERIFIED + ORDER CREATED")
@@ -2609,7 +2616,6 @@ def complete_payment_and_create_order():
         print("Customer token exists:", bool(customer_token))
         print("Session token exists:", bool(session.get("customer_order_token")))
         print("Session permanent:", session.permanent)
-        print("Session modified:", session.modified)
         print("======================================")
 
 
@@ -3004,8 +3010,6 @@ def create_order():
 
         session.permanent = True
 
-        session.modified = True
-
 
         print(
             "✅ ORDER CREATED:",
@@ -3026,9 +3030,6 @@ def create_order():
 
             "order_number":
                 order_number,
-
-            "customer_order_token":
-                customer_token,
 
         }), 201
 
@@ -3069,28 +3070,6 @@ def create_order():
 
 
 # ============================================================
-# CUSTOMER SESSION STATUS
-# ============================================================
-
-@app.route("/api/customer-session", methods=["GET"])
-def get_customer_session():
-    token = get_customer_order_token()
-    
-    print("\n======================================")
-    print("🔐 CUSTOMER SESSION CHECK")
-    print("Has customer token:", bool(token))
-    print("Session permanent:", session.permanent)
-    print("======================================")
-    
-    return jsonify({
-        "success": True,
-        "authenticated": bool(token),
-        "has_customer_token": bool(token),
-        "has_customer_order_session": bool(token),
-    }), 200
-
-
-# ============================================================
 # MY ORDERS - CUSTOMER ONLY
 # ============================================================
 
@@ -3111,7 +3090,6 @@ def get_my_orders():
         print("🛍️ MY ORDERS REQUEST")
         print("Customer token exists:", bool(customer_token))
         print("Session permanent:", session.permanent)
-        print("Token value:", customer_token[:20] if customer_token else "NONE")
         print("======================================")
 
         if not customer_token:
@@ -3255,7 +3233,7 @@ def get_my_orders():
 
 
 # ============================================================
-# CUSTOMER ORDER SESSION STATUS (OLD ENDPOINT)
+# CUSTOMER ORDER SESSION STATUS
 # ============================================================
 
 @app.route("/api/my-orders/session", methods=["GET"])
@@ -5504,7 +5482,7 @@ if __name__ == "__main__":
     )
 
     print(
-        "🛍️  SARIKA FASHIONS BACKEND - FIXED"
+        "🛍️  SARIKA FASHIONS BACKEND"
     )
 
     print(
@@ -5548,11 +5526,6 @@ if __name__ == "__main__":
     )
 
     print(
-        "Customer Session Check:",
-        "http://localhost:5000/api/customer-session"
-    )
-
-    print(
         "Customer Returns:",
         "http://localhost:5000/api/my-returns"
     )
@@ -5573,30 +5546,6 @@ if __name__ == "__main__":
     )
 
     print(
-        "=========================================="
-    )
-
-    print(
-        "🔐 SESSION CONFIGURATION:"
-    )
-
-    print(
-        "Session Cookie Name: sarika_customer_session"
-    )
-
-    print(
-        "SameSite: Lax"
-    )
-
-    print(
-        "Secure: True (HTTPS only on Vercel)"
-    )
-
-    print(
-        "HttpOnly: True"
-    )
-
-    print(
         "==========================================\n"
     )
 
@@ -5605,3 +5554,4 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=5000
     )
+
