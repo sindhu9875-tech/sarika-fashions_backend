@@ -232,9 +232,97 @@ def admin_required(f):
 
 def get_customer_order_token():
 
-    return session.get(
+    # --------------------------------------------------------
+    # CUSTOMER ORDER TOKEN SOURCES
+    #
+    # 1. Flask session cookie (normal browser flow)
+    # 2. Authorization: Bearer <token>
+    # 3. X-Customer-Order-Token: <token>
+    # 4. ?customer_order_token=<token>
+    #
+    # The token is a customer-only order access token.  Supporting
+    # the header/query fallback is important for the deployed
+    # Vercel -> Render setup where a cross-site session cookie can
+    # sometimes be unavailable to the browser.
+    # --------------------------------------------------------
+
+    token = session.get(
         "customer_order_token"
     )
+
+    if token:
+        return str(token).strip()
+
+    authorization = request.headers.get(
+        "Authorization",
+        ""
+    ).strip()
+
+    if authorization.lower().startswith("bearer "):
+        bearer_token = authorization[7:].strip()
+
+        if bearer_token:
+            session["customer_order_token"] = bearer_token
+            session.permanent = True
+            return bearer_token
+
+    header_token = request.headers.get(
+        "X-Customer-Order-Token",
+        ""
+    ).strip()
+
+    if header_token:
+        session["customer_order_token"] = header_token
+        session.permanent = True
+        return header_token
+
+    query_token = request.args.get(
+        "customer_order_token",
+        ""
+    ).strip()
+
+    if query_token:
+        session["customer_order_token"] = query_token
+        session.permanent = True
+        return query_token
+
+    # For POST requests, also accept a token in JSON/form data.
+    # This keeps the existing frontend compatible while allowing
+    # the more reliable header method above.
+    try:
+        if request.method in ("POST", "PUT", "PATCH"):
+            data = request.get_json(
+                silent=True
+            ) or {}
+
+            body_token = str(
+                data.get(
+                    "customer_order_token",
+                    ""
+                )
+            ).strip()
+
+            if body_token:
+                session["customer_order_token"] = body_token
+                session.permanent = True
+                return body_token
+
+            form_token = str(
+                request.form.get(
+                    "customer_order_token",
+                    ""
+                )
+            ).strip()
+
+            if form_token:
+                session["customer_order_token"] = form_token
+                session.permanent = True
+                return form_token
+
+    except Exception:
+        pass
+
+    return None
 
 
 def create_customer_order_token():
@@ -2269,6 +2357,13 @@ def complete_payment_and_create_order():
                 "order_status":
                     existing_order["order_status"],
 
+                # The frontend must retain this token for My Orders.
+                "customer_order_token":
+                    existing_token,
+
+                "customer_order_session":
+                    bool(existing_token),
+
             }), 200
 
 
@@ -3093,12 +3188,13 @@ def get_my_orders():
         print("======================================")
 
         if not customer_token:
-            print("❌ NO CUSTOMER ORDER SESSION")
+            print("❌ NO CUSTOMER ORDER TOKEN")
             return jsonify({
                 "success": True,
                 "authenticated": False,
                 "orders": [],
                 "message": "Customer order session not found",
+                "needs_customer_order_token": True,
             }), 200
 
         conn = get_db_connection()
