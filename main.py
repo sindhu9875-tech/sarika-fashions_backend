@@ -283,7 +283,7 @@ def create_tables():
             )
         """)
 
-        # MIGRATION CHECKS FOR MISSING COLUMNS
+        # MIGRATION CHECKS
         migrations = [
             ("subtotal", "DECIMAL(10,2) NULL"),
             ("shipping", "DECIMAL(10,2) NULL"),
@@ -300,12 +300,11 @@ def create_tables():
         for col_name, col_def in migrations:
             cur.execute(f"SHOW COLUMNS FROM orders LIKE '{col_name}'")
             if not cur.fetchone():
-                print(f"➕ Adding missing column {col_name} to orders...")
                 try:
                     cur.execute(f"ALTER TABLE orders ADD COLUMN {col_name} {col_def}")
-                    print(f"✅ {col_name} added")
+                    print(f"✅ Column {col_name} added to orders")
                 except Exception as alter_err:
-                    print(f"Note on adding {col_name}:", alter_err)
+                    print(f"Note on {col_name}:", alter_err)
 
         # 3. REVIEWS
         cur.execute("""
@@ -328,7 +327,7 @@ def create_tables():
                 product_id INT,
                 product_name VARCHAR(255) NOT NULL,
                 quantity INT DEFAULT 1,
-                customer_access_token VARCHAR(255) NOT NULL,
+                customer_access_token VARCHAR(191) NOT NULL,
                 reason VARCHAR(150) NOT NULL,
                 description TEXT,
                 return_status VARCHAR(50) DEFAULT 'Return Requested',
@@ -336,8 +335,7 @@ def create_tables():
                 admin_note TEXT,
                 requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                INDEX idx_return_order_id (order_id),
-                INDEX idx_return_customer_token (customer_access_token)
+                INDEX idx_return_order_id (order_id)
             )
         """)
 
@@ -356,13 +354,13 @@ def create_tables():
 
 
 # ============================================================
-# RUN MIGRATIONS ON RENDER/GUNICORN STARTUP
+# RUN MIGRATIONS ON STARTUP (RENDER / GUNICORN)
 # ============================================================
 
 try:
     create_tables()
 except Exception as e:
-    print("Startup table check note:", e)
+    print("Startup check notice:", e)
 
 
 # ============================================================
@@ -718,7 +716,6 @@ def verify_payment():
 
 # ============================================================
 # COMPLETE RAZORPAY PAYMENT + CREATE CUSTOMER ORDER
-# (DYNAMIC COLUMN DETECTION - PREVENTS UNKNOWN COLUMN ERRORS)
 # ============================================================
 
 @app.route("/api/payment/complete", methods=["POST"])
@@ -849,7 +846,7 @@ def complete_payment_and_create_order():
                 next_num = 1
         order_number = f"SF-{next_num:05d}"
 
-        # 8. DYNAMIC COLUMN DETECTION (PREVENTS 'UNKNOWN COLUMN' ERRORS)
+        # 8. DYNAMIC COLUMN DETECTION (PREVENTS ANY UNKNOWN COLUMN ERROR)
         cur.execute("SHOW COLUMNS FROM orders")
         existing_cols = {col["Field"] for col in cur.fetchall()}
 
@@ -871,7 +868,6 @@ def complete_payment_and_create_order():
             "customer_access_token": customer_token,
         }
 
-        # Only include columns if they exist in the MySQL table
         if "address_line" in existing_cols:
             order_data_map["address_line"] = address_line
         if "subtotal" in existing_cols:
@@ -1041,7 +1037,7 @@ def create_order():
 
 
 # ============================================================
-# MY ORDERS - CUSTOMER (WITH TOKEN & PHONE FALLBACK)
+# MY ORDERS - CUSTOMER ONLY (BULLETPROOF)
 # ============================================================
 
 @app.route("/api/my-orders", methods=["GET"])
@@ -1055,25 +1051,31 @@ def get_my_orders():
 
         print("\n======================================")
         print("🛍️ MY ORDERS REQUEST")
-        print("Customer token exists:", bool(customer_token))
-        print("Customer phone fallback:", bool(phone))
-        print("Session permanent:", session.permanent)
+        print("Customer token:", customer_token)
+        print("Phone fallback:", phone)
         print("======================================")
 
         if not customer_token and not phone:
-            print("❌ NO CUSTOMER ORDER TOKEN OR PHONE")
             return jsonify({
                 "success": True,
                 "authenticated": False,
                 "orders": [],
-                "message": "Customer order session not found",
-                "needs_customer_order_token": True,
+                "message": "Please enter your phone number to find orders.",
             }), 200
 
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
 
-        if customer_token:
+        if customer_token and phone:
+            cur.execute(
+                """
+                SELECT * FROM orders
+                WHERE customer_access_token=%s OR customer_phone=%s
+                ORDER BY created_at DESC
+                """,
+                (customer_token, phone)
+            )
+        elif customer_token:
             cur.execute(
                 """
                 SELECT * FROM orders
@@ -1094,32 +1096,32 @@ def get_my_orders():
 
         orders = cur.fetchall()
 
+        # Safe return_requests query that will never crash the request
         order_ids = [order["id"] for order in orders if order.get("id") is not None]
         return_requests_by_order = {}
 
         if order_ids:
-            placeholders = ",".join(["%s"] * len(order_ids))
-            cur.execute(
-                f"""
-                SELECT
-                    id, order_id, order_number, product_id,
-                    product_name, quantity, reason, description,
-                    return_status, refund_status, admin_note,
-                    requested_at, updated_at
-                FROM return_requests
-                WHERE order_id IN ({placeholders})
-                ORDER BY requested_at DESC
-                """,
-                tuple(order_ids)
-            )
-
-            for return_item in cur.fetchall():
-                if return_item.get("requested_at"):
-                    return_item["requested_at"] = return_item["requested_at"].isoformat()
-                if return_item.get("updated_at"):
-                    return_item["updated_at"] = return_item["updated_at"].isoformat()
-
-                return_requests_by_order.setdefault(return_item["order_id"], []).append(return_item)
+            try:
+                placeholders = ",".join(["%s"] * len(order_ids))
+                cur.execute(
+                    f"""
+                    SELECT id, order_id, order_number, product_id, product_name,
+                           quantity, reason, description, return_status, refund_status,
+                           admin_note, requested_at, updated_at
+                    FROM return_requests
+                    WHERE order_id IN ({placeholders})
+                    ORDER BY requested_at DESC
+                    """,
+                    tuple(order_ids)
+                )
+                for return_item in cur.fetchall():
+                    if return_item.get("requested_at") and hasattr(return_item["requested_at"], "isoformat"):
+                        return_item["requested_at"] = return_item["requested_at"].isoformat()
+                    if return_item.get("updated_at") and hasattr(return_item["updated_at"], "isoformat"):
+                        return_item["updated_at"] = return_item["updated_at"].isoformat()
+                    return_requests_by_order.setdefault(return_item["order_id"], []).append(return_item)
+            except Exception as ret_err:
+                print("Notice: return_requests check skipped:", ret_err)
 
         datetime_fields = [
             "created_at", "confirmed_at", "shipped_at",
@@ -1128,8 +1130,12 @@ def get_my_orders():
 
         for order in orders:
             for field in datetime_fields:
-                if order.get(field):
-                    order[field] = order[field].isoformat()
+                val = order.get(field)
+                if val:
+                    if hasattr(val, "isoformat"):
+                        order[field] = val.isoformat()
+                    else:
+                        order[field] = str(val)
 
             order["customer_received"] = bool(order.get("customer_received", 0))
 
@@ -1165,7 +1171,7 @@ def get_my_orders():
             "success": False,
             "authenticated": False,
             "orders": [],
-            "message": "Failed to fetch your orders",
+            "message": f"Failed to fetch your orders: {str(e)}",
             "error": str(e),
         }), 500
 
