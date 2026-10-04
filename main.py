@@ -1456,7 +1456,19 @@ def admin_get_returns():
     try:
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM return_requests ORDER BY requested_at DESC")
+
+        # Join orders so the admin panel gets customer name/email/phone.
+        # customer_access_token is intentionally NOT selected.
+        cur.execute("""
+            SELECT
+                r.id, r.order_id, r.order_number, r.product_id, r.product_name,
+                r.quantity, r.reason, r.description, r.return_status,
+                r.refund_status, r.admin_note, r.requested_at, r.updated_at,
+                o.customer_name, o.customer_email, o.customer_phone
+            FROM return_requests r
+            LEFT JOIN orders o ON o.id = r.order_id
+            ORDER BY r.requested_at DESC
+        """)
         returns = cur.fetchall()
 
         for item in returns:
