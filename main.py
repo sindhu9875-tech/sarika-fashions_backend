@@ -1457,14 +1457,11 @@ def admin_get_returns():
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
 
+        # SELECT r.* works whatever columns the live table has.
         # Join orders so the admin panel gets customer name/email/phone.
-        # customer_access_token is intentionally NOT selected.
         cur.execute("""
-            SELECT
-                r.id, r.order_id, r.order_number, r.product_id, r.product_name,
-                r.quantity, r.reason, r.description, r.return_status,
-                r.refund_status, r.admin_note, r.requested_at, r.updated_at,
-                o.customer_name, o.customer_email, o.customer_phone
+            SELECT r.*,
+                   o.customer_name, o.customer_email, o.customer_phone
             FROM return_requests r
             LEFT JOIN orders o ON o.id = r.order_id
             ORDER BY r.requested_at DESC
@@ -1472,12 +1469,16 @@ def admin_get_returns():
         returns = cur.fetchall()
 
         for item in returns:
-            if item.get("requested_at"):
-                item["requested_at"] = item["requested_at"].isoformat()
-            if item.get("updated_at"):
-                item["updated_at"] = item["updated_at"].isoformat()
+            item.pop("customer_access_token", None)
+            for field in ("requested_at", "updated_at"):
+                if item.get(field) and hasattr(item[field], "isoformat"):
+                    item[field] = item[field].isoformat()
 
         return jsonify({"success": True, "returns": returns})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "message": f"Failed to load returns: {str(e)}"}), 500
     finally:
         if cur:
             cur.close()
