@@ -79,6 +79,10 @@ ALLOWED_ORIGINS = [
     "http://10.101.222.75:5173",
     "http://10.101.222.75:5174",
     "https://sarika-fashions-frontend.vercel.app",
+     "https://www.sarikafashions.in",
+    "https://sarikafashions.in",
+    "https://api.sarikafashions.in",
+
 ]
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "").strip().rstrip("/")
