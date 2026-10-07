@@ -132,7 +132,6 @@ if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
     )
 
     print(f"✅ Razorpay Loaded: {RAZORPAY_KEY_ID}")
-
 else:
     print("❌ Razorpay keys missing")
 
@@ -171,17 +170,10 @@ def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
 
-        logged_in = session.get(
-            "admin_logged_in",
-            False
-        )
-
-        admin_email = session.get(
-            "admin_email"
-        )
+        logged_in = session.get("admin_logged_in", False)
+        admin_email = session.get("admin_email")
 
         if not logged_in:
-
             print("❌ ADMIN AUTH FAILED")
 
             return jsonify({
@@ -190,10 +182,7 @@ def admin_required(f):
                 "logged_in": False,
             }), 401
 
-        print(
-            "✅ ADMIN AUTH PASSED:",
-            admin_email
-        )
+        print("✅ ADMIN AUTH PASSED:", admin_email)
 
         return f(*args, **kwargs)
 
@@ -206,9 +195,7 @@ def admin_required(f):
 
 def get_customer_order_token():
 
-    token = session.get(
-        "customer_order_token"
-    )
+    token = session.get("customer_order_token")
 
     if token:
         return str(token).strip()
@@ -223,10 +210,8 @@ def get_customer_order_token():
         bearer_token = authorization[7:].strip()
 
         if bearer_token:
-
             session["customer_order_token"] = bearer_token
             session.permanent = True
-
             return bearer_token
 
     header_token = request.headers.get(
@@ -255,15 +240,9 @@ def get_customer_order_token():
 
     try:
 
-        if request.method in (
-            "POST",
-            "PUT",
-            "PATCH"
-        ):
+        if request.method in ("POST", "PUT", "PATCH"):
 
-            data = request.get_json(
-                silent=True
-            ) or {}
+            data = request.get_json(silent=True) or {}
 
             body_token = str(
                 data.get(
@@ -274,10 +253,7 @@ def get_customer_order_token():
 
             if body_token:
 
-                session[
-                    "customer_order_token"
-                ] = body_token
-
+                session["customer_order_token"] = body_token
                 session.permanent = True
 
                 return body_token
@@ -291,10 +267,7 @@ def get_customer_order_token():
 
             if form_token:
 
-                session[
-                    "customer_order_token"
-                ] = form_token
-
+                session["customer_order_token"] = form_token
                 session.permanent = True
 
                 return form_token
@@ -309,13 +282,142 @@ def create_customer_order_token():
 
     token = secrets.token_urlsafe(48)
 
-    session[
-        "customer_order_token"
-    ] = token
-
+    session["customer_order_token"] = token
     session.permanent = True
 
     return token
+
+
+# ============================================================
+# HELPER - SAFE JSON
+# ============================================================
+
+def parse_order_items(items):
+
+    if isinstance(items, str):
+
+        try:
+            items = json.loads(items)
+
+        except Exception:
+            return []
+
+    if not isinstance(items, list):
+        return []
+
+    return items
+
+
+# ============================================================
+# HELPER - PRODUCT ID NORMALIZATION
+# ============================================================
+
+def normalize_product_id(value):
+
+    if value is None:
+        return None
+
+    try:
+        return int(value)
+
+    except (ValueError, TypeError):
+        return str(value).strip()
+
+
+# ============================================================
+# HELPER - GET PRODUCT ID FROM ORDER ITEM
+# ============================================================
+
+def get_item_product_id(item):
+
+    if not isinstance(item, dict):
+        return None
+
+    possible_ids = [
+        item.get("product_id"),
+        item.get("productId"),
+        item.get("id"),
+    ]
+
+    product = item.get("product")
+
+    if isinstance(product, dict):
+
+        possible_ids.extend([
+            product.get("id"),
+            product.get("product_id"),
+            product.get("productId"),
+        ])
+
+    for value in possible_ids:
+
+        if value is not None and str(value).strip() != "":
+            return value
+
+    return None
+
+
+# ============================================================
+# HELPER - GET PRODUCT NAME FROM ORDER ITEM
+# ============================================================
+
+def get_item_product_name(item):
+
+    if not isinstance(item, dict):
+        return ""
+
+    possible_names = [
+        item.get("product_name"),
+        item.get("productName"),
+        item.get("name"),
+        item.get("title"),
+    ]
+
+    product = item.get("product")
+
+    if isinstance(product, dict):
+
+        possible_names.extend([
+            product.get("name"),
+            product.get("title"),
+            product.get("product_name"),
+        ])
+
+    for value in possible_names:
+
+        if value is not None and str(value).strip():
+            return str(value).strip()
+
+    return ""
+
+
+# ============================================================
+# HELPER - GET ITEM QUANTITY
+# ============================================================
+
+def get_item_quantity(item):
+
+    if not isinstance(item, dict):
+        return 1
+
+    value = (
+        item.get("quantity")
+        if item.get("quantity") is not None
+        else item.get("qty", 1)
+    )
+
+    try:
+
+        quantity = int(value)
+
+        if quantity < 1:
+            return 1
+
+        return quantity
+
+    except (ValueError, TypeError):
+
+        return 1
 
 
 # ============================================================
@@ -332,9 +434,9 @@ def create_tables():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # =====================================================
-        # 1. ADMINS
-        # =====================================================
+        # ====================================================
+        # ADMINS
+        # ====================================================
 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS admins (
@@ -345,9 +447,9 @@ def create_tables():
             )
         """)
 
-        # =====================================================
-        # 2. ORDERS
-        # =====================================================
+        # ====================================================
+        # ORDERS
+        # ====================================================
 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS orders (
@@ -380,51 +482,34 @@ def create_tables():
             )
         """)
 
-        # =====================================================
+        # ====================================================
         # ORDER MIGRATIONS
-        # =====================================================
+        # ====================================================
 
         migrations = [
-            (
-                "subtotal",
-                "DECIMAL(10,2) NULL"
-            ),
-            (
-                "shipping",
-                "DECIMAL(10,2) NULL"
-            ),
-            (
-                "address_line",
-                "VARCHAR(255) NULL"
-            ),
-            (
-                "customer_access_token",
-                "VARCHAR(255) NULL"
-            ),
+
+            ("subtotal", "DECIMAL(10,2) NULL"),
+
+            ("shipping", "DECIMAL(10,2) NULL"),
+
+            ("address_line", "VARCHAR(255) NULL"),
+
+            ("customer_access_token", "VARCHAR(255) NULL"),
+
             (
                 "customer_received",
                 "TINYINT(1) NOT NULL DEFAULT 0"
             ),
-            (
-                "received_at",
-                "DATETIME NULL"
-            ),
-            (
-                "confirmed_at",
-                "DATETIME NULL"
-            ),
-            (
-                "shipped_at",
-                "DATETIME NULL"
-            ),
-            (
-                "out_for_delivery_at",
-                "DATETIME NULL"
-            ),
-            (
-                "delivered_at",
-                "DATETIME NULL"
-            ),
+
+            ("received_at", "DATETIME NULL"),
+
+            ("confirmed_at", "DATETIME NULL"),
+
+            ("shipped_at", "DATETIME NULL"),
+
+            ("out_for_delivery_at", "DATETIME NULL"),
+
+            ("delivered_at", "DATETIME NULL"),
         ]
 
         for col_name, col_def in migrations:
@@ -455,9 +540,9 @@ def create_tables():
                         alter_err
                     )
 
-        # =====================================================
-        # 3. REVIEWS
-        # =====================================================
+        # ====================================================
+        # REVIEWS
+        # ====================================================
 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS reviews (
@@ -470,50 +555,71 @@ def create_tables():
             )
         """)
 
-        # =====================================================
-        # 4. RETURN REQUESTS
-        # =====================================================
+        # ====================================================
+        # RETURN REQUESTS
+        # ====================================================
 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS return_requests (
                 id INT AUTO_INCREMENT PRIMARY KEY,
+
                 order_id INT NOT NULL,
+
                 order_number VARCHAR(50) NOT NULL,
+
                 product_id INT,
+
                 product_name VARCHAR(255) NOT NULL,
+
                 quantity INT DEFAULT 1,
+
                 customer_access_token VARCHAR(191) NOT NULL,
+
                 reason VARCHAR(150) NOT NULL,
+
                 description TEXT,
+
                 return_status VARCHAR(50)
                     DEFAULT 'Return Requested',
+
                 refund_status VARCHAR(50)
                     DEFAULT 'Not Initiated',
+
                 refund_id VARCHAR(100) NULL,
+
                 refund_amount DECIMAL(10,2) NULL,
+
                 admin_note TEXT,
+
                 requested_at TIMESTAMP
                     DEFAULT CURRENT_TIMESTAMP,
+
                 updated_at TIMESTAMP
                     DEFAULT CURRENT_TIMESTAMP
                     ON UPDATE CURRENT_TIMESTAMP,
-                INDEX idx_return_order_id (order_id)
+
+                INDEX idx_return_order_id (order_id),
+
+                INDEX idx_return_product_id (product_id)
             )
         """)
 
-        # =====================================================
-        # RETURN REQUEST MIGRATIONS
-        # =====================================================
+        # ====================================================
+        # RETURN TABLE MIGRATIONS
+        # ====================================================
 
         return_migrations = [
+
             (
                 "refund_id",
                 "VARCHAR(100) NULL"
             ),
+
             (
                 "refund_amount",
                 "DECIMAL(10,2) NULL"
             ),
+
             (
                 "admin_note",
                 "TEXT"
@@ -524,8 +630,7 @@ def create_tables():
 
             cur.execute(
                 f"""
-                SHOW COLUMNS
-                FROM return_requests
+                SHOW COLUMNS FROM return_requests
                 LIKE '{col_name}'
                 """
             )
@@ -542,15 +647,13 @@ def create_tables():
                     )
 
                     print(
-                        f"✅ Column {col_name} added "
-                        f"to return_requests"
+                        f"✅ Column {col_name} added to return_requests"
                     )
 
                 except Exception as alter_err:
 
                     print(
-                        f"Note on return column "
-                        f"{col_name}:",
+                        f"Note on return column {col_name}:",
                         alter_err
                     )
 
@@ -562,10 +665,7 @@ def create_tables():
 
     except Exception as e:
 
-        print(
-            "❌ Table error:",
-            e
-        )
+        print("❌ Table error:", e)
 
         if conn:
             conn.rollback()
@@ -589,10 +689,7 @@ try:
 
 except Exception as e:
 
-    print(
-        "Startup check notice:",
-        e
-    )
+    print("Startup check notice:", e)
 
 
 # ============================================================
@@ -603,11 +700,15 @@ except Exception as e:
 def home():
 
     return jsonify({
+
         "success": True,
-        "message": "Sarika Fashions backend running!",
-        "razorpay": bool(
-            razorpay_client
-        ),
+
+        "message":
+            "Sarika Fashions backend running!",
+
+        "razorpay":
+            bool(razorpay_client),
+
     })
 
 
@@ -636,10 +737,12 @@ def admin_login():
     if not ADMIN_EMAIL or not ADMIN_PASSWORD:
 
         return jsonify({
+
             "success": False,
+
             "message":
-                "Admin credentials not configured "
-                "in backend .env",
+                "Admin credentials not configured in backend .env",
+
         }), 500
 
     if (
@@ -649,26 +752,31 @@ def admin_login():
     ):
 
         return jsonify({
+
             "success": False,
-            "message": "Invalid email or password",
+
+            "message":
+                "Invalid email or password",
+
         }), 401
 
-    session[
-        "admin_logged_in"
-    ] = True
+    session["admin_logged_in"] = True
 
-    session[
-        "admin_email"
-    ] = ADMIN_EMAIL
+    session["admin_email"] = ADMIN_EMAIL
 
     session.permanent = True
 
     return jsonify({
+
         "success": True,
-        "message": "Admin login successful",
+
+        "message":
+            "Admin login successful",
+
         "admin": {
             "email": ADMIN_EMAIL
         },
+
     })
 
 
@@ -692,17 +800,26 @@ def admin_me():
     if not logged_in:
 
         return jsonify({
+
             "success": False,
+
             "logged_in": False,
-            "message": "Admin session not found",
+
+            "message":
+                "Admin session not found",
+
         }), 401
 
     return jsonify({
+
         "success": True,
+
         "logged_in": True,
+
         "admin": {
             "email": admin_email
         },
+
     })
 
 
@@ -723,8 +840,12 @@ def admin_logout():
     )
 
     return jsonify({
+
         "success": True,
-        "message": "Logged out successfully",
+
+        "message":
+            "Logged out successfully",
+
     })
 
 
@@ -763,15 +884,21 @@ def get_products():
                 p.image2,
                 p.image3,
                 p.image4,
+
                 COALESCE(
                     ROUND(AVG(r.rating), 1),
                     0
                 ) AS rating,
+
                 COUNT(r.id) AS reviews
+
             FROM products p
+
             LEFT JOIN reviews r
                 ON p.id = r.product_id
+
             GROUP BY p.id
+
             ORDER BY p.created_at DESC
         """)
 
@@ -779,15 +906,12 @@ def get_products():
 
         for product in products:
 
-            if product.get(
-                "created_at"
-            ):
+            if product.get("created_at"):
 
-                product[
-                    "created_at"
-                ] = product[
-                    "created_at"
-                ].isoformat()
+                product["created_at"] = (
+                    product["created_at"]
+                    .isoformat()
+                )
 
             product["price"] = float(
                 product["price"] or 0
@@ -810,15 +934,21 @@ def get_products():
             )
 
         return jsonify({
+
             "success": True,
-            "products": products
+
+            "products": products,
+
         })
 
     except Error as e:
 
         return jsonify({
+
             "success": False,
-            "error": str(e)
+
+            "error": str(e),
+
         }), 500
 
     finally:
@@ -861,23 +991,27 @@ def get_product(product_id):
         if not product:
 
             return jsonify({
+
                 "success": False,
-                "message": "Product not found"
+
+                "message":
+                    "Product not found",
+
             }), 404
 
-        if product.get(
-            "created_at"
-        ):
+        if product.get("created_at"):
 
-            product[
-                "created_at"
-            ] = product[
-                "created_at"
-            ].isoformat()
+            product["created_at"] = (
+                product["created_at"]
+                .isoformat()
+            )
 
         return jsonify({
+
             "success": True,
-            "product": product
+
+            "product": product,
+
         })
 
     finally:
@@ -938,14 +1072,18 @@ def add_product():
         if not name or not category:
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "Name and Category are required"
+                    "Name and Category are required",
+
             }), 400
 
         try:
 
             price = float(price)
+
             stock = int(stock)
 
             old_price = (
@@ -960,9 +1098,12 @@ def add_product():
         ):
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "Invalid numeric fields"
+                    "Invalid numeric fields",
+
             }), 400
 
         image_urls = {}
@@ -971,7 +1112,7 @@ def add_product():
             "image",
             "image2",
             "image3",
-            "image4"
+            "image4",
         ]:
 
             file = request.files.get(
@@ -985,20 +1126,19 @@ def add_product():
                     folder="sarika-fashions/products"
                 )
 
-                image_urls[
-                    field_name
-                ] = res.get(
-                    "secure_url"
+                image_urls[field_name] = (
+                    res.get("secure_url")
                 )
 
-        if not image_urls.get(
-            "image"
-        ):
+        if not image_urls.get("image"):
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "Main product image is required"
+                    "Main product image is required",
+
             }), 400
 
         conn = get_db_connection()
@@ -1023,16 +1163,27 @@ def add_product():
                 %s,%s,%s,%s,%s
             )
         """, (
+
             name,
+
             category,
+
             price,
+
             old_price,
+
             image_urls.get("image"),
+
             description,
+
             stock,
+
             image_urls.get("image2"),
+
             image_urls.get("image3"),
-            image_urls.get("image4")
+
+            image_urls.get("image4"),
+
         ))
 
         product_id = cur.lastrowid
@@ -1040,10 +1191,15 @@ def add_product():
         conn.commit()
 
         return jsonify({
+
             "success": True,
+
             "message":
                 "Product added successfully",
-            "product_id": product_id
+
+            "product_id":
+                product_id,
+
         }), 201
 
     except Exception as e:
@@ -1052,8 +1208,11 @@ def add_product():
             conn.rollback()
 
         return jsonify({
+
             "success": False,
-            "error": str(e)
+
+            "error": str(e),
+
         }), 500
 
     finally:
@@ -1097,9 +1256,12 @@ def update_product(product_id):
         if not existing:
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "Product not found"
+                    "Product not found",
+
             }), 404
 
         name = request.form.get(
@@ -1134,13 +1296,9 @@ def update_product(product_id):
 
         try:
 
-            price = float(
-                price_val
-            )
+            price = float(price_val)
 
-            stock = int(
-                stock_val
-            )
+            stock = int(stock_val)
 
             old_price = (
                 float(old_price_val)
@@ -1154,9 +1312,12 @@ def update_product(product_id):
         ):
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "Invalid numeric fields"
+                    "Invalid numeric fields",
+
             }), 400
 
         image_urls = {
@@ -1165,7 +1326,7 @@ def update_product(product_id):
                 "image",
                 "image2",
                 "image3",
-                "image4"
+                "image4",
             ]
         }
 
@@ -1173,7 +1334,7 @@ def update_product(product_id):
             "image",
             "image2",
             "image3",
-            "image4"
+            "image4",
         ]:
 
             file = request.files.get(
@@ -1187,18 +1348,15 @@ def update_product(product_id):
                     folder="sarika-fashions/products"
                 )
 
-                if res.get(
-                    "secure_url"
-                ):
+                if res.get("secure_url"):
 
-                    image_urls[
-                        field_name
-                    ] = res[
-                        "secure_url"
-                    ]
+                    image_urls[field_name] = (
+                        res["secure_url"]
+                    )
 
         cur.execute("""
             UPDATE products
+
             SET
                 name=%s,
                 category=%s,
@@ -1210,27 +1368,43 @@ def update_product(product_id):
                 image2=%s,
                 image3=%s,
                 image4=%s
+
             WHERE id=%s
         """, (
+
             name,
+
             category,
+
             price,
+
             old_price,
+
             description,
+
             stock,
+
             image_urls["image"],
+
             image_urls["image2"],
+
             image_urls["image3"],
+
             image_urls["image4"],
-            product_id
+
+            product_id,
+
         ))
 
         conn.commit()
 
         return jsonify({
+
             "success": True,
+
             "message":
-                "Product updated successfully"
+                "Product updated successfully",
+
         })
 
     except Exception as e:
@@ -1239,8 +1413,11 @@ def update_product(product_id):
             conn.rollback()
 
         return jsonify({
+
             "success": False,
-            "error": str(e)
+
+            "error": str(e),
+
         }), 500
 
     finally:
@@ -1279,17 +1456,23 @@ def delete_product(product_id):
         if cur.rowcount == 0:
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "Product not found"
+                    "Product not found",
+
             }), 404
 
         conn.commit()
 
         return jsonify({
+
             "success": True,
+
             "message":
-                "Product deleted successfully"
+                "Product deleted successfully",
+
         })
 
     finally:
@@ -1302,7 +1485,7 @@ def delete_product(product_id):
 
 
 # ============================================================
-# RAZORPAY KEY & ORDER CREATION
+# RAZORPAY KEY
 # ============================================================
 
 @app.route(
@@ -1312,10 +1495,17 @@ def delete_product(product_id):
 def get_razorpay_key():
 
     return jsonify({
+
         "key": RAZORPAY_KEY_ID,
+
         "key_id": RAZORPAY_KEY_ID,
+
     })
 
+
+# ============================================================
+# RAZORPAY CREATE ORDER
+# ============================================================
 
 @app.route(
     "/api/payment/create-order",
@@ -1328,9 +1518,12 @@ def create_payment_order():
         if not razorpay_client:
 
             return jsonify({
+
                 "success": False,
+
                 "error":
-                    "Razorpay keys missing"
+                    "Razorpay keys missing",
+
             }), 500
 
         data = request.get_json(
@@ -1354,21 +1547,42 @@ def create_payment_order():
             amount_paise = 100
 
         order = razorpay_client.order.create({
-            "amount": amount_paise,
-            "currency": "INR",
+
+            "amount":
+                amount_paise,
+
+            "currency":
+                "INR",
+
             "receipt":
                 f"receipt_{int(datetime.now().timestamp())}",
-            "payment_capture": 1,
+
+            "payment_capture":
+                1,
+
         })
 
         return jsonify({
+
             "success": True,
+
             "order": order,
-            "order_id": order["id"],
-            "amount": order["amount"],
-            "currency": order["currency"],
-            "key_id": RAZORPAY_KEY_ID,
-            "key": RAZORPAY_KEY_ID,
+
+            "order_id":
+                order["id"],
+
+            "amount":
+                order["amount"],
+
+            "currency":
+                order["currency"],
+
+            "key_id":
+                RAZORPAY_KEY_ID,
+
+            "key":
+                RAZORPAY_KEY_ID,
+
         })
 
     except Exception as e:
@@ -1379,10 +1593,17 @@ def create_payment_order():
         )
 
         return jsonify({
+
             "success": False,
-            "error": str(e)
+
+            "error": str(e),
+
         }), 500
 
+
+# ============================================================
+# RAZORPAY VERIFY
+# ============================================================
 
 @app.route(
     "/api/payment/verify",
@@ -1395,9 +1616,12 @@ def verify_payment():
         if not razorpay_client:
 
             return jsonify({
+
                 "success": False,
+
                 "error":
-                    "Razorpay is not configured"
+                    "Razorpay is not configured",
+
             }), 500
 
         data = request.get_json(
@@ -1405,30 +1629,40 @@ def verify_payment():
         ) or {}
 
         razorpay_client.utility.verify_payment_signature({
+
             "razorpay_order_id":
                 data["razorpay_order_id"],
+
             "razorpay_payment_id":
                 data["razorpay_payment_id"],
+
             "razorpay_signature":
                 data["razorpay_signature"],
+
         })
 
         return jsonify({
+
             "success": True,
+
             "message":
-                "Payment verified successfully"
+                "Payment verified successfully",
+
         })
 
     except Exception as e:
 
         return jsonify({
+
             "success": False,
-            "error": str(e)
+
+            "error": str(e),
+
         }), 400
 
 
 # ============================================================
-# COMPLETE RAZORPAY PAYMENT + CREATE CUSTOMER ORDER
+# COMPLETE PAYMENT + CREATE ORDER
 # ============================================================
 
 @app.route(
@@ -1445,9 +1679,12 @@ def complete_payment_and_create_order():
         if not razorpay_client:
 
             return jsonify({
+
                 "success": False,
+
                 "message":
                     "Razorpay is not configured",
+
             }), 500
 
         data = request.get_json(
@@ -1482,24 +1719,31 @@ def complete_payment_and_create_order():
         ):
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "Razorpay payment details missing"
+                    "Razorpay payment details missing",
+
             }), 400
 
-        # =====================================================
+        # ====================================================
         # VERIFY SIGNATURE
-        # =====================================================
+        # ====================================================
 
         try:
 
             razorpay_client.utility.verify_payment_signature({
+
                 "razorpay_order_id":
                     razorpay_order_id,
+
                 "razorpay_payment_id":
                     razorpay_payment_id,
+
                 "razorpay_signature":
                     razorpay_signature,
+
             })
 
         except Exception as sig_err:
@@ -1510,15 +1754,17 @@ def complete_payment_and_create_order():
             )
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    f"Signature verification failed: "
-                    f"{str(sig_err)}"
+                    f"Signature verification failed: {str(sig_err)}",
+
             }), 400
 
-        # =====================================================
+        # ====================================================
         # FETCH PAYMENT
-        # =====================================================
+        # ====================================================
 
         payment = razorpay_client.payment.fetch(
             razorpay_payment_id
@@ -1533,15 +1779,16 @@ def complete_payment_and_create_order():
 
         if payment_status not in [
             "captured",
-            "authorized"
+            "authorized",
         ]:
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    f"Payment is in "
-                    f"'{payment_status}' status, "
-                    f"not captured.",
+                    f"Payment is in '{payment_status}' status, not captured.",
+
             }), 400
 
         if payment_status == "authorized":
@@ -1567,9 +1814,9 @@ def complete_payment_and_create_order():
                     cap_err
                 )
 
-        # =====================================================
+        # ====================================================
         # VERIFY AMOUNT
-        # =====================================================
+        # ====================================================
 
         razorpay_amount = int(
             payment.get(
@@ -1619,22 +1866,27 @@ def complete_payment_and_create_order():
             )
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    f"Payment amount mismatch: "
-                    f"expected {razorpay_amount} paise, "
-                    f"got {requested_amount_paise} paise",
+                    f"Payment amount mismatch: expected {razorpay_amount} paise, got {requested_amount_paise} paise",
+
             }), 400
 
-        # =====================================================
-        # PREVENT DUPLICATES
-        # =====================================================
+        # ====================================================
+        # DATABASE
+        # ====================================================
 
         conn = get_db_connection()
 
         cur = conn.cursor(
             dictionary=True
         )
+
+        # ====================================================
+        # PREVENT DUPLICATES
+        # ====================================================
 
         cur.execute(
             """
@@ -1644,8 +1896,11 @@ def complete_payment_and_create_order():
                 customer_access_token,
                 payment_status,
                 order_status
+
             FROM orders
+
             WHERE razorpay_payment_id=%s
+
             LIMIT 1
             """,
             (razorpay_payment_id,)
@@ -1670,20 +1925,26 @@ def complete_payment_and_create_order():
                 session.permanent = True
 
             return jsonify({
+
                 "success": True,
+
                 "message":
                     "Order already exists",
+
                 "order_id":
                     existing_order["id"],
+
                 "order_number":
                     existing_order["order_number"],
+
                 "customer_order_token":
                     existing_token,
+
             }), 200
 
-        # =====================================================
+        # ====================================================
         # CUSTOMER TOKEN
-        # =====================================================
+        # ====================================================
 
         customer_token = (
             get_customer_order_token()
@@ -1695,9 +1956,9 @@ def complete_payment_and_create_order():
                 create_customer_order_token()
             )
 
-        # =====================================================
-        # PARSE DETAILS
-        # =====================================================
+        # ====================================================
+        # CUSTOMER DETAILS
+        # ====================================================
 
         customer_name = str(
             data.get(
@@ -1795,9 +2056,9 @@ def complete_payment_and_create_order():
             else razorpay_amount / 100.0
         )
 
-        # =====================================================
+        # ====================================================
         # ORDER NUMBER
-        # =====================================================
+        # ====================================================
 
         cur.execute(
             """
@@ -1812,11 +2073,8 @@ def complete_payment_and_create_order():
 
         next_num = 1
 
-        if (
-            last
-            and last.get(
-                "order_number"
-            )
+        if last and last.get(
+            "order_number"
         ):
 
             try:
@@ -1824,7 +2082,9 @@ def complete_payment_and_create_order():
                 next_num = (
                     int(
                         str(
-                            last["order_number"]
+                            last[
+                                "order_number"
+                            ]
                         ).replace(
                             "SF-",
                             ""
@@ -1841,9 +2101,9 @@ def complete_payment_and_create_order():
             f"SF-{next_num:05d}"
         )
 
-        # =====================================================
-        # DYNAMIC COLUMN DETECTION
-        # =====================================================
+        # ====================================================
+        # DYNAMIC COLUMNS
+        # ====================================================
 
         cur.execute(
             "SHOW COLUMNS FROM orders"
@@ -1900,6 +2160,7 @@ def complete_payment_and_create_order():
 
             "customer_access_token":
                 customer_token,
+
         }
 
         if "address_line" in existing_cols:
@@ -1937,7 +2198,8 @@ def complete_payment_and_create_order():
             f"""
             INSERT INTO orders
             ({', '.join(columns)})
-            VALUES ({placeholders})
+            VALUES
+            ({placeholders})
             """,
             values
         )
@@ -1971,17 +2233,24 @@ def complete_payment_and_create_order():
         )
 
         return jsonify({
+
             "success": True,
+
             "message":
                 "Order created successfully",
+
             "order_id":
                 order_id,
+
             "order_number":
                 order_number,
+
             "customer_order_token":
                 customer_token,
+
             "total_amount":
                 total_amount,
+
         }), 201
 
     except Exception as e:
@@ -1999,11 +2268,15 @@ def complete_payment_and_create_order():
         traceback.print_exc()
 
         return jsonify({
+
             "success": False,
+
             "message":
                 f"Failed to save order: {str(e)}",
+
             "error":
                 str(e),
+
         }), 500
 
     finally:
@@ -2016,7 +2289,7 @@ def complete_payment_and_create_order():
 
 
 # ============================================================
-# CREATE ORDER - MANUAL / FALLBACK
+# MANUAL / FALLBACK ORDER
 # ============================================================
 
 @app.route(
@@ -2161,9 +2434,12 @@ def create_order():
         ):
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "All customer fields and items are required"
+                    "All customer fields and items are required",
+
             }), 400
 
         conn = get_db_connection()
@@ -2185,11 +2461,8 @@ def create_order():
 
         next_num = 1
 
-        if (
-            last
-            and last.get(
-                "order_number"
-            )
+        if last and last.get(
+            "order_number"
         ):
 
             try:
@@ -2197,7 +2470,9 @@ def create_order():
                 next_num = (
                     int(
                         str(
-                            last["order_number"]
+                            last[
+                                "order_number"
+                            ]
                         ).replace(
                             "SF-",
                             ""
@@ -2269,6 +2544,7 @@ def create_order():
 
             "customer_access_token":
                 customer_token,
+
         }
 
         if "address_line" in existing_cols:
@@ -2306,7 +2582,8 @@ def create_order():
             f"""
             INSERT INTO orders
             ({', '.join(columns)})
-            VALUES ({placeholders})
+            VALUES
+            ({placeholders})
             """,
             values
         )
@@ -2322,15 +2599,21 @@ def create_order():
         session.permanent = True
 
         return jsonify({
+
             "success": True,
+
             "message":
                 "Order created successfully",
+
             "order_id":
                 order_id,
+
             "order_number":
                 order_number,
+
             "customer_order_token":
                 customer_token,
+
         }), 201
 
     except Exception as e:
@@ -2339,8 +2622,12 @@ def create_order():
             conn.rollback()
 
         return jsonify({
+
             "success": False,
-            "error": str(e)
+
+            "error":
+                str(e),
+
         }), 500
 
     finally:
@@ -2353,7 +2640,7 @@ def create_order():
 
 
 # ============================================================
-# MY ORDERS - CUSTOMER
+# MY ORDERS
 # ============================================================
 
 @app.route(
@@ -2401,12 +2688,16 @@ def get_my_orders():
         if not customer_token and not phone:
 
             return jsonify({
+
                 "success": True,
+
                 "authenticated": False,
+
                 "orders": [],
+
                 "message":
-                    "Please enter your phone number "
-                    "to find orders.",
+                    "Please enter your phone number to find orders.",
+
             }), 200
 
         conn = get_db_connection()
@@ -2421,13 +2712,16 @@ def get_my_orders():
                 """
                 SELECT *
                 FROM orders
-                WHERE customer_access_token=%s
-                   OR customer_phone=%s
+
+                WHERE
+                    customer_access_token=%s
+                    OR customer_phone=%s
+
                 ORDER BY created_at DESC
                 """,
                 (
                     customer_token,
-                    phone
+                    phone,
                 )
             )
 
@@ -2437,7 +2731,9 @@ def get_my_orders():
                 """
                 SELECT *
                 FROM orders
+
                 WHERE customer_access_token=%s
+
                 ORDER BY created_at DESC
                 """,
                 (customer_token,)
@@ -2449,7 +2745,9 @@ def get_my_orders():
                 """
                 SELECT *
                 FROM orders
+
                 WHERE customer_phone=%s
+
                 ORDER BY created_at DESC
                 """,
                 (phone,)
@@ -2457,11 +2755,14 @@ def get_my_orders():
 
         orders = cur.fetchall()
 
+        # ====================================================
+        # GET RETURNS FOR THESE ORDERS
+        # ====================================================
+
         order_ids = [
             order["id"]
             for order in orders
-            if order.get("id")
-            is not None
+            if order.get("id") is not None
         ]
 
         return_requests_by_order = {}
@@ -2487,11 +2788,17 @@ def get_my_orders():
                         description,
                         return_status,
                         refund_status,
+                        refund_id,
+                        refund_amount,
                         admin_note,
                         requested_at,
                         updated_at
+
                     FROM return_requests
-                    WHERE order_id IN ({placeholders})
+
+                    WHERE order_id IN
+                    ({placeholders})
+
                     ORDER BY requested_at DESC
                     """,
                     tuple(order_ids)
@@ -2513,9 +2820,11 @@ def get_my_orders():
 
                         return_item[
                             "requested_at"
-                        ] = return_item[
-                            "requested_at"
-                        ].isoformat()
+                        ] = (
+                            return_item[
+                                "requested_at"
+                            ].isoformat()
+                        )
 
                     if (
                         return_item.get(
@@ -2531,9 +2840,23 @@ def get_my_orders():
 
                         return_item[
                             "updated_at"
-                        ] = return_item[
-                            "updated_at"
-                        ].isoformat()
+                        ] = (
+                            return_item[
+                                "updated_at"
+                            ].isoformat()
+                        )
+
+                    if return_item.get(
+                        "refund_amount"
+                    ) is not None:
+
+                        return_item[
+                            "refund_amount"
+                        ] = float(
+                            return_item[
+                                "refund_amount"
+                            ]
+                        )
 
                     return_requests_by_order.setdefault(
                         return_item["order_id"],
@@ -2545,27 +2868,31 @@ def get_my_orders():
             except Exception as ret_err:
 
                 print(
-                    "Notice: return_requests "
-                    "check skipped:",
+                    "Notice: return_requests check skipped:",
                     ret_err
                 )
 
         datetime_fields = [
+
             "created_at",
+
             "confirmed_at",
+
             "shipped_at",
+
             "out_for_delivery_at",
+
             "delivered_at",
-            "received_at"
+
+            "received_at",
+
         ]
 
         for order in orders:
 
             for field in datetime_fields:
 
-                val = order.get(
-                    field
-                )
+                val = order.get(field)
 
                 if val:
 
@@ -2593,27 +2920,9 @@ def get_my_orders():
                 )
             )
 
-            if isinstance(
-                order.get("items"),
-                str
-            ):
-
-                try:
-
-                    order["items"] = json.loads(
-                        order["items"]
-                    )
-
-                except Exception:
-
-                    order["items"] = []
-
-            if not isinstance(
-                order.get("items"),
-                list
-            ):
-
-                order["items"] = []
+            order["items"] = parse_order_items(
+                order.get("items")
+            )
 
             order["subtotal"] = float(
                 order.get(
@@ -2644,20 +2953,24 @@ def get_my_orders():
                 []
             )
 
+            # NEVER expose customer token
             order.pop(
                 "customer_access_token",
                 None
             )
 
         print(
-            f"✅ MY ORDERS FOUND: "
-            f"{len(orders)}"
+            f"✅ MY ORDERS FOUND: {len(orders)}"
         )
 
         return jsonify({
+
             "success": True,
+
             "authenticated": True,
+
             "orders": orders,
+
         }), 200
 
     except Exception as e:
@@ -2672,14 +2985,19 @@ def get_my_orders():
         traceback.print_exc()
 
         return jsonify({
+
             "success": False,
+
             "authenticated": False,
+
             "orders": [],
+
             "message":
-                f"Failed to fetch your orders: "
-                f"{str(e)}",
+                f"Failed to fetch your orders: {str(e)}",
+
             "error":
                 str(e),
+
         }), 500
 
     finally:
@@ -2700,11 +3018,15 @@ def my_orders_session_status():
     token = get_customer_order_token()
 
     return jsonify({
+
         "success": True,
+
         "authenticated":
             bool(token),
+
         "has_customer_order_session":
             bool(token),
+
     }), 200
 
 
@@ -2730,9 +3052,12 @@ def customer_confirm_received(order_id):
         if not customer_token:
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "Customer order session not found."
+                    "Customer order session not found.",
+
             }), 401
 
         conn = get_db_connection()
@@ -2749,13 +3074,16 @@ def customer_confirm_received(order_id):
                 order_status,
                 customer_received,
                 received_at
+
             FROM orders
-            WHERE id=%s
-              AND customer_access_token=%s
+
+            WHERE
+                id=%s
+                AND customer_access_token=%s
             """,
             (
                 order_id,
-                customer_token
+                customer_token,
             )
         )
 
@@ -2764,9 +3092,12 @@ def customer_confirm_received(order_id):
         if not order:
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "Order not found."
+                    "Order not found.",
+
             }), 404
 
         current_status = (
@@ -2777,50 +3108,58 @@ def customer_confirm_received(order_id):
 
         if int(
             order.get(
-                "customer_received",
-                0
-            )
+                "customer_received"
+            ) or 0
         ) == 1:
 
             return jsonify({
+
                 "success": True,
+
                 "message":
-                    "Order was already "
-                    "confirmed as received."
+                    "Order was already confirmed as received.",
+
             })
 
         if current_status != "Delivered":
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "Receipt can only be "
-                    "confirmed once Delivered."
+                    "Receipt can only be confirmed once Delivered.",
+
             }), 400
 
         cur.execute(
             """
             UPDATE orders
+
             SET
                 customer_received=1,
                 received_at=NOW(),
                 order_status='Closed'
-            WHERE id=%s
-              AND customer_access_token=%s
+
+            WHERE
+                id=%s
+                AND customer_access_token=%s
             """,
             (
                 order_id,
-                customer_token
+                customer_token,
             )
         )
 
         conn.commit()
 
         return jsonify({
+
             "success": True,
+
             "message":
-                "Order received successfully. "
-                "Order is now closed."
+                "Order received successfully. Order is now closed.",
+
         })
 
     finally:
@@ -2836,9 +3175,7 @@ def customer_confirm_received(order_id):
     "/api/orders/<int:order_id>/received",
     methods=["PUT", "POST"]
 )
-def confirm_order_received_legacy(
-    order_id
-):
+def confirm_order_received_legacy(order_id):
 
     return customer_confirm_received(
         order_id
@@ -2846,7 +3183,7 @@ def confirm_order_received_legacy(
 
 
 # ============================================================
-# CUSTOMER RETURN REQUEST
+# CREATE RETURN REQUEST - FIXED
 # ============================================================
 
 @app.route(
@@ -2859,6 +3196,10 @@ def create_return_request():
     cur = None
 
     try:
+
+        # ====================================================
+        # GET TOKEN
+        # ====================================================
 
         authorization = request.headers.get(
             "Authorization",
@@ -2880,7 +3221,10 @@ def create_return_request():
                 authorization[7:].strip()
             )
 
-        if not customer_token and header_token:
+        if (
+            not customer_token
+            and header_token
+        ):
 
             customer_token = header_token
 
@@ -2889,6 +3233,14 @@ def create_return_request():
             customer_token = (
                 get_customer_order_token()
             )
+
+        # ====================================================
+        # READ DATA
+        # ====================================================
+
+        data = request.get_json(
+            silent=True
+        ) or {}
 
         print(
             "\n======================================"
@@ -2904,25 +3256,42 @@ def create_return_request():
         )
 
         print(
-            "======================================"
-        )
-
-        if not customer_token:
-
-            return jsonify({
-                "success": False,
-                "message":
-                    "Customer order session not found."
-            }), 401
-
-        data = request.get_json(
-            silent=True
-        ) or {}
-
-        print(
             "Return data:",
             data
         )
+
+        print(
+            "======================================"
+        )
+
+        # ====================================================
+        # PHONE FALLBACK
+        # ====================================================
+
+        customer_phone = str(
+            data.get(
+                "customer_phone",
+                data.get(
+                    "phone",
+                    ""
+                )
+            )
+        ).strip()
+
+        if not customer_token and not customer_phone:
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    "Customer order session not found.",
+
+            }), 401
+
+        # ====================================================
+        # READ RETURN DATA
+        # ====================================================
 
         order_id = data.get(
             "order_id"
@@ -2935,11 +3304,11 @@ def create_return_request():
             )
         ).strip().upper()
 
-        product_id = data.get(
+        requested_product_id = data.get(
             "product_id"
         )
 
-        product_name = str(
+        requested_product_name = str(
             data.get(
                 "product_name",
                 ""
@@ -2948,7 +3317,7 @@ def create_return_request():
 
         try:
 
-            quantity = int(
+            requested_quantity = int(
                 data.get(
                     "quantity",
                     1
@@ -2960,7 +3329,7 @@ def create_return_request():
             TypeError
         ):
 
-            quantity = 1
+            requested_quantity = 1
 
         reason = str(
             data.get(
@@ -2976,29 +3345,46 @@ def create_return_request():
             )
         ).strip()
 
+        # ====================================================
+        # VALIDATION
+        # ====================================================
+
         if not order_id:
 
             return jsonify({
-                "success": False,
-                "message":
-                    "Order ID is required."
-            }), 400
 
-        if not product_name:
-
-            return jsonify({
                 "success": False,
+
                 "message":
-                    "Product name is required."
+                    "Order ID is required.",
+
             }), 400
 
         if not reason:
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "Return reason is required."
+                    "Return reason is required.",
+
             }), 400
+
+        if requested_quantity < 1:
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    "Return quantity must be at least 1.",
+
+            }), 400
+
+        # ====================================================
+        # DATABASE
+        # ====================================================
 
         conn = get_db_connection()
 
@@ -3006,64 +3392,429 @@ def create_return_request():
             dictionary=True
         )
 
-        cur.execute(
-            """
-            SELECT
-                id,
-                order_number,
-                customer_access_token
-            FROM orders
-            WHERE id=%s
-              AND customer_access_token=%s
-            LIMIT 1
-            """,
-            (
-                order_id,
-                customer_token
+        # ====================================================
+        # FIND ORDER
+        #
+        # Token is preferred.
+        # Phone is fallback for your existing My Orders flow.
+        # ====================================================
+
+        order = None
+
+        if customer_token:
+
+            cur.execute(
+                """
+                SELECT *
+
+                FROM orders
+
+                WHERE
+                    id=%s
+                    AND customer_access_token=%s
+
+                LIMIT 1
+                """,
+                (
+                    order_id,
+                    customer_token,
+                )
             )
-        )
 
-        order = cur.fetchone()
+            order = cur.fetchone()
 
-        print(
-            "Order ID:",
-            order_id
-        )
+        if not order and customer_phone:
 
-        print(
-            "Order found:",
-            bool(order)
-        )
+            cur.execute(
+                """
+                SELECT *
+
+                FROM orders
+
+                WHERE
+                    id=%s
+                    AND customer_phone=%s
+
+                LIMIT 1
+                """,
+                (
+                    order_id,
+                    customer_phone,
+                )
+            )
+
+            order = cur.fetchone()
+
+        # ====================================================
+        # LAST FALLBACK:
+        # ORDER NUMBER + PHONE
+        # ====================================================
+
+        if (
+            not order
+            and order_number
+            and customer_phone
+        ):
+
+            cur.execute(
+                """
+                SELECT *
+
+                FROM orders
+
+                WHERE
+                    order_number=%s
+                    AND customer_phone=%s
+
+                LIMIT 1
+                """,
+                (
+                    order_number,
+                    customer_phone,
+                )
+            )
+
+            order = cur.fetchone()
 
         if not order:
 
             print(
-                "❌ RETURN FAILED: "
-                "order/token mismatch"
+                "❌ RETURN FAILED: order not found"
             )
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "Order not found or "
-                    "customer access token is invalid."
+                    "Order not found or customer details do not match.",
+
             }), 404
+
+        # ====================================================
+        # GET REAL CUSTOMER TOKEN
+        # ====================================================
+
+        real_customer_token = (
+            order.get(
+                "customer_access_token"
+            )
+        )
+
+        if not real_customer_token:
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    "This order does not have a customer access token.",
+
+            }), 400
+
+        # ====================================================
+        # PARSE ORDER ITEMS
+        # ====================================================
+
+        order_items = parse_order_items(
+            order.get("items")
+        )
+
+        if not order_items:
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    "No products were found in this order.",
+
+            }), 400
+
+        print(
+            "Order items:",
+            order_items
+        )
+
+        # ====================================================
+        # FIND EXACT PRODUCT
+        # ====================================================
+
+        selected_item = None
+
+        normalized_requested_id = (
+            normalize_product_id(
+                requested_product_id
+            )
+        )
+
+        # ----------------------------------------------------
+        # FIRST: MATCH BY PRODUCT ID
+        # ----------------------------------------------------
+
+        if normalized_requested_id is not None:
+
+            for item in order_items:
+
+                item_product_id = (
+                    get_item_product_id(
+                        item
+                    )
+                )
+
+                normalized_item_id = (
+                    normalize_product_id(
+                        item_product_id
+                    )
+                )
+
+                if (
+                    normalized_item_id
+                    is not None
+                    and normalized_item_id
+                    == normalized_requested_id
+                ):
+
+                    selected_item = item
+                    break
+
+        # ----------------------------------------------------
+        # SECOND: MATCH BY PRODUCT NAME
+        # ----------------------------------------------------
+
+        if (
+            selected_item is None
+            and requested_product_name
+        ):
+
+            requested_name_lower = (
+                requested_product_name
+                .strip()
+                .lower()
+            )
+
+            for item in order_items:
+
+                item_name = (
+                    get_item_product_name(
+                        item
+                    )
+                )
+
+                if (
+                    item_name
+                    and item_name.strip().lower()
+                    == requested_name_lower
+                ):
+
+                    selected_item = item
+                    break
+
+        # ====================================================
+        # PRODUCT NOT FOUND
+        # ====================================================
+
+        if selected_item is None:
+
+            print(
+                "❌ PRODUCT NOT FOUND IN ORDER"
+            )
+
+            print(
+                "Requested product ID:",
+                requested_product_id
+            )
+
+            print(
+                "Requested product name:",
+                requested_product_name
+            )
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    "The selected product was not found in this order.",
+
+            }), 400
+
+        # ====================================================
+        # GET ACTUAL PRODUCT DATA
+        # ====================================================
+
+        actual_product_id = (
+            get_item_product_id(
+                selected_item
+            )
+        )
+
+        actual_product_name = (
+            get_item_product_name(
+                selected_item
+            )
+        )
+
+        if not actual_product_name:
+
+            actual_product_name = (
+                requested_product_name
+                or "Product"
+            )
+
+        ordered_quantity = (
+            get_item_quantity(
+                selected_item
+            )
+        )
+
+        # ====================================================
+        # CLAMP RETURN QUANTITY
+        # ====================================================
+
+        return_quantity = min(
+            requested_quantity,
+            ordered_quantity
+        )
+
+        if return_quantity < 1:
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    "Invalid return quantity.",
+
+            }), 400
+
+        # ====================================================
+        # CHECK DUPLICATE RETURN
+        #
+        # If same product already has a return request,
+        # do not create another one.
+        # ====================================================
+
+        duplicate_return = None
+
+        if actual_product_id is not None:
+
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    return_status,
+                    refund_status
+
+                FROM return_requests
+
+                WHERE
+                    order_id=%s
+                    AND product_id=%s
+
+                LIMIT 1
+                """,
+                (
+                    order["id"],
+                    normalize_product_id(
+                        actual_product_id
+                    ),
+                )
+            )
+
+            duplicate_return = (
+                cur.fetchone()
+            )
+
+        if (
+            duplicate_return is None
+            and actual_product_name
+        ):
+
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    return_status,
+                    refund_status
+
+                FROM return_requests
+
+                WHERE
+                    order_id=%s
+                    AND LOWER(TRIM(product_name))
+                        = LOWER(TRIM(%s))
+
+                LIMIT 1
+                """,
+                (
+                    order["id"],
+                    actual_product_name,
+                )
+            )
+
+            duplicate_return = (
+                cur.fetchone()
+            )
+
+        if duplicate_return:
+
+            return jsonify({
+
+                "success": False,
+
+                "already_exists": True,
+
+                "return_id":
+                    duplicate_return["id"],
+
+                "message":
+                    "A return request already exists for this product.",
+
+                "return_status":
+                    duplicate_return.get(
+                        "return_status"
+                    ),
+
+                "refund_status":
+                    duplicate_return.get(
+                        "refund_status"
+                    ),
+
+            }), 409
+
+        # ====================================================
+        # INSERT RETURN
+        # ====================================================
 
         cur.execute(
             """
             INSERT INTO return_requests (
+
                 order_id,
+
                 order_number,
+
                 product_id,
+
                 product_name,
+
                 quantity,
+
                 customer_access_token,
+
                 reason,
+
                 description,
+
                 return_status,
+
                 refund_status
+
             )
+
             VALUES (
+
                 %s,
                 %s,
                 %s,
@@ -3074,25 +3825,55 @@ def create_return_request():
                 %s,
                 'Return Requested',
                 'Not Initiated'
+
             )
             """,
             (
                 order["id"],
+
                 order.get(
                     "order_number"
                 ) or order_number,
-                product_id,
-                product_name,
-                quantity,
-                customer_token,
+
+                (
+                    normalize_product_id(
+                        actual_product_id
+                    )
+                    if actual_product_id
+                    is not None
+                    else None
+                ),
+
+                actual_product_name,
+
+                return_quantity,
+
+                real_customer_token,
+
                 reason,
+
                 description,
+
             )
         )
 
         return_id = cur.lastrowid
 
         conn.commit()
+
+        # ====================================================
+        # RESTORE SESSION TOKEN
+        # ====================================================
+
+        session[
+            "customer_order_token"
+        ] = real_customer_token
+
+        session.permanent = True
+
+        print(
+            "======================================"
+        )
 
         print(
             "✅ RETURN REQUEST SAVED"
@@ -3110,9 +3891,22 @@ def create_return_request():
 
         print(
             "Order Number:",
-            order.get(
-                "order_number"
-            )
+            order.get("order_number")
+        )
+
+        print(
+            "Product ID:",
+            actual_product_id
+        )
+
+        print(
+            "Product Name:",
+            actual_product_name
+        )
+
+        print(
+            "Quantity:",
+            return_quantity
         )
 
         print(
@@ -3120,11 +3914,38 @@ def create_return_request():
         )
 
         return jsonify({
+
             "success": True,
+
             "message":
                 "Return request submitted successfully",
+
             "return_id":
                 return_id,
+
+            "order_id":
+                order["id"],
+
+            "order_number":
+                order.get(
+                    "order_number"
+                ),
+
+            "product_id":
+                actual_product_id,
+
+            "product_name":
+                actual_product_name,
+
+            "quantity":
+                return_quantity,
+
+            "return_status":
+                "Return Requested",
+
+            "refund_status":
+                "Not Initiated",
+
         }), 201
 
     except Exception as e:
@@ -3142,12 +3963,15 @@ def create_return_request():
         traceback.print_exc()
 
         return jsonify({
+
             "success": False,
+
             "message":
-                f"Failed to submit return request: "
-                f"{str(e)}",
+                f"Failed to submit return request: {str(e)}",
+
             "error":
                 str(e),
+
         }), 500
 
     finally:
@@ -3160,7 +3984,7 @@ def create_return_request():
 
 
 # ============================================================
-# CUSTOMER RETURNS
+# MY RETURNS - FIXED
 # ============================================================
 
 @app.route(
@@ -3178,12 +4002,24 @@ def get_my_returns():
             get_customer_order_token()
         )
 
-        if not customer_token:
+        phone = request.args.get(
+            "phone",
+            ""
+        ).strip()
+
+        if (
+            not customer_token
+            and not phone
+        ):
 
             return jsonify({
+
                 "success": True,
+
                 "authenticated": False,
-                "returns": []
+
+                "returns": [],
+
             })
 
         conn = get_db_connection()
@@ -3192,15 +4028,65 @@ def get_my_returns():
             dictionary=True
         )
 
-        cur.execute(
-            """
-            SELECT *
-            FROM return_requests
-            WHERE customer_access_token=%s
-            ORDER BY requested_at DESC
-            """,
-            (customer_token,)
-        )
+        # ====================================================
+        # TOKEN FIRST
+        # ====================================================
+
+        if customer_token:
+
+            cur.execute(
+                """
+                SELECT
+                    r.*,
+                    o.customer_name,
+                    o.customer_email,
+                    o.customer_phone
+
+                FROM return_requests r
+
+                LEFT JOIN orders o
+                    ON o.id = r.order_id
+
+                WHERE
+                    r.customer_access_token=%s
+
+                ORDER BY
+                    r.requested_at DESC
+                """,
+                (
+                    customer_token,
+                )
+            )
+
+        else:
+
+            # =================================================
+            # PHONE FALLBACK
+            # =================================================
+
+            cur.execute(
+                """
+                SELECT
+                    r.*,
+                    o.customer_name,
+                    o.customer_email,
+                    o.customer_phone
+
+                FROM return_requests r
+
+                LEFT JOIN orders o
+                    ON o.id = r.order_id
+
+                WHERE
+                    o.customer_phone=%s
+
+                ORDER BY
+                    r.requested_at DESC
+                """,
+                (
+                    phone,
+                )
+            )
 
         returns = cur.fetchall()
 
@@ -3226,11 +4112,51 @@ def get_my_returns():
                     "updated_at"
                 ].isoformat()
 
+            if item.get(
+                "refund_amount"
+            ) is not None:
+
+                item[
+                    "refund_amount"
+                ] = float(
+                    item[
+                        "refund_amount"
+                    ]
+                )
+
+            # Never send customer token
+            item.pop(
+                "customer_access_token",
+                None
+            )
+
         return jsonify({
+
             "success": True,
+
             "authenticated": True,
-            "returns": returns
+
+            "returns": returns,
+
         })
+
+    except Exception as e:
+
+        print(
+            "❌ MY RETURNS ERROR:",
+            repr(e)
+        )
+
+        return jsonify({
+
+            "success": False,
+
+            "message":
+                f"Failed to load returns: {str(e)}",
+
+            "returns": [],
+
+        }), 500
 
     finally:
 
@@ -3240,6 +4166,10 @@ def get_my_returns():
         if conn:
             conn.close()
 
+
+# ============================================================
+# GET ONE CUSTOMER RETURN
+# ============================================================
 
 @app.route(
     "/api/my-returns/<int:return_id>",
@@ -3256,12 +4186,23 @@ def get_my_return(return_id):
             get_customer_order_token()
         )
 
-        if not customer_token:
+        phone = request.args.get(
+            "phone",
+            ""
+        ).strip()
+
+        if (
+            not customer_token
+            and not phone
+        ):
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "Customer order session not found"
+                    "Customer order session not found",
+
             }), 401
 
         conn = get_db_connection()
@@ -3270,27 +4211,82 @@ def get_my_return(return_id):
             dictionary=True
         )
 
-        cur.execute(
-            """
-            SELECT *
-            FROM return_requests
-            WHERE id=%s
-              AND customer_access_token=%s
-            """,
-            (
-                return_id,
-                customer_token
-            )
-        )
+        return_item = None
 
-        return_item = cur.fetchone()
+        if customer_token:
+
+            cur.execute(
+                """
+                SELECT
+                    r.*,
+                    o.customer_name,
+                    o.customer_email,
+                    o.customer_phone
+
+                FROM return_requests r
+
+                LEFT JOIN orders o
+                    ON o.id = r.order_id
+
+                WHERE
+                    r.id=%s
+                    AND r.customer_access_token=%s
+
+                LIMIT 1
+                """,
+                (
+                    return_id,
+                    customer_token,
+                )
+            )
+
+            return_item = (
+                cur.fetchone()
+            )
+
+        if (
+            not return_item
+            and phone
+        ):
+
+            cur.execute(
+                """
+                SELECT
+                    r.*,
+                    o.customer_name,
+                    o.customer_email,
+                    o.customer_phone
+
+                FROM return_requests r
+
+                LEFT JOIN orders o
+                    ON o.id = r.order_id
+
+                WHERE
+                    r.id=%s
+                    AND o.customer_phone=%s
+
+                LIMIT 1
+                """,
+                (
+                    return_id,
+                    phone,
+                )
+            )
+
+            return_item = (
+                cur.fetchone()
+            )
 
         if not return_item:
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "Return request not found"
+                    "Return request not found",
+
             }), 404
 
         if return_item.get(
@@ -3313,9 +4309,30 @@ def get_my_return(return_id):
                 "updated_at"
             ].isoformat()
 
+        if return_item.get(
+            "refund_amount"
+        ) is not None:
+
+            return_item[
+                "refund_amount"
+            ] = float(
+                return_item[
+                    "refund_amount"
+                ]
+            )
+
+        return_item.pop(
+            "customer_access_token",
+            None
+        )
+
         return jsonify({
+
             "success": True,
-            "return": return_item
+
+            "return":
+                return_item,
+
         })
 
     finally:
@@ -3360,12 +4377,19 @@ def get_orders():
         orders = cur.fetchall()
 
         datetime_fields = [
+
             "created_at",
+
             "confirmed_at",
+
             "shipped_at",
+
             "out_for_delivery_at",
+
             "delivered_at",
-            "received_at"
+
+            "received_at",
+
         ]
 
         for order in orders:
@@ -3388,20 +4412,9 @@ def get_orders():
                 )
             )
 
-            if isinstance(
-                order.get("items"),
-                str
-            ):
-
-                try:
-
-                    order["items"] = json.loads(
-                        order["items"]
-                    )
-
-                except Exception:
-
-                    order["items"] = []
+            order["items"] = parse_order_items(
+                order.get("items")
+            )
 
             order[
                 "total_amount"
@@ -3412,7 +4425,9 @@ def get_orders():
             )
 
             order["total"] = (
-                order["total_amount"]
+                order[
+                    "total_amount"
+                ]
             )
 
             order.pop(
@@ -3421,8 +4436,11 @@ def get_orders():
             )
 
         return jsonify({
+
             "success": True,
-            "orders": orders
+
+            "orders": orders,
+
         })
 
     finally:
@@ -3435,7 +4453,7 @@ def get_orders():
 
 
 # ============================================================
-# ADMIN - UPDATE ORDER STATUS
+# ADMIN UPDATE ORDER STATUS
 # ============================================================
 
 @app.route(
@@ -3465,17 +4483,27 @@ def update_order_status(order_id):
         ).strip()
 
         allowed_statuses = [
+
             "Placed",
+
             "Confirmed",
+
             "Shipped",
+
             "Out for Delivery",
+
             "Delivered",
-            "Cancelled"
+
+            "Cancelled",
+
         ]
 
         status_map = {
+
             s.lower(): s
+
             for s in allowed_statuses
+
         }
 
         new_status = status_map.get(
@@ -3485,9 +4513,12 @@ def update_order_status(order_id):
         if not new_status:
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "Invalid order status."
+                    "Invalid order status.",
+
             }), 400
 
         conn = get_db_connection()
@@ -3501,7 +4532,9 @@ def update_order_status(order_id):
             SELECT
                 id,
                 order_status
+
             FROM orders
+
             WHERE id=%s
             """,
             (order_id,)
@@ -3512,9 +4545,12 @@ def update_order_status(order_id):
         if not order:
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "Order not found."
+                    "Order not found.",
+
             }), 404
 
         time_field_map = {
@@ -3530,6 +4566,7 @@ def update_order_status(order_id):
 
             "Delivered":
                 "delivered_at=NOW()",
+
         }
 
         extra_sql = ""
@@ -3538,29 +4575,36 @@ def update_order_status(order_id):
 
             extra_sql = (
                 ", "
-                + time_field_map[new_status]
+                + time_field_map[
+                    new_status
+                ]
             )
 
         cur.execute(
             f"""
             UPDATE orders
-            SET order_status=%s
-            {extra_sql}
+
+            SET
+                order_status=%s
+                {extra_sql}
+
             WHERE id=%s
             """,
             (
                 new_status,
-                order_id
+                order_id,
             )
         )
 
         conn.commit()
 
         return jsonify({
+
             "success": True,
+
             "message":
-                f"Order status changed "
-                f"to {new_status}."
+                f"Order status changed to {new_status}.",
+
         })
 
     finally:
@@ -3573,7 +4617,7 @@ def update_order_status(order_id):
 
 
 # ============================================================
-# ADMIN - GET RETURN REQUESTS
+# ADMIN GET RETURNS - FIXED
 # ============================================================
 
 @app.route(
@@ -3597,14 +4641,70 @@ def admin_get_returns():
         cur.execute(
             """
             SELECT
-                r.*,
+
+                r.id,
+
+                r.order_id,
+
+                r.order_number,
+
+                r.product_id,
+
+                r.product_name,
+
+                r.quantity,
+
+                r.reason,
+
+                r.description,
+
+                r.return_status,
+
+                r.refund_status,
+
+                r.refund_id,
+
+                r.refund_amount,
+
+                r.admin_note,
+
+                r.requested_at,
+
+                r.updated_at,
+
                 o.customer_name,
+
                 o.customer_email,
-                o.customer_phone
+
+                o.customer_phone,
+
+                o.address,
+
+                o.address_line,
+
+                o.city,
+
+                o.state,
+
+                o.pincode,
+
+                o.total_amount,
+
+                o.payment_status,
+
+                o.razorpay_order_id,
+
+                o.razorpay_payment_id,
+
+                o.order_status
+
             FROM return_requests r
+
             LEFT JOIN orders o
                 ON o.id = r.order_id
-            ORDER BY r.requested_at DESC
+
+            ORDER BY
+                r.requested_at DESC
             """
         )
 
@@ -3612,15 +4712,10 @@ def admin_get_returns():
 
         for item in returns:
 
-            item.pop(
-                "customer_access_token",
-                None
-            )
-
-            for field in (
+            for field in [
                 "requested_at",
-                "updated_at"
-            ):
+                "updated_at",
+            ]:
 
                 if (
                     item.get(field)
@@ -3647,9 +4742,52 @@ def admin_get_returns():
                     ]
                 )
 
+            if item.get(
+                "total_amount"
+            ) is not None:
+
+                item[
+                    "total_amount"
+                ] = float(
+                    item[
+                        "total_amount"
+                    ]
+                )
+
+        print(
+            "======================================"
+        )
+
+        print(
+            "ADMIN RETURNS FOUND:",
+            len(returns)
+        )
+
+        for item in returns:
+
+            print(
+                "Return:",
+                item.get("id"),
+                "| Order:",
+                item.get("order_number"),
+                "| Product:",
+                item.get("product_name"),
+                "| Status:",
+                item.get("return_status")
+            )
+
+        print(
+            "======================================"
+        )
+
         return jsonify({
+
             "success": True,
-            "returns": returns
+
+            "returns": returns,
+
+            "count": len(returns),
+
         })
 
     except Exception as e:
@@ -3659,10 +4797,14 @@ def admin_get_returns():
         traceback.print_exc()
 
         return jsonify({
+
             "success": False,
+
             "message":
-                f"Failed to load returns: "
-                f"{str(e)}"
+                f"Failed to load returns: {str(e)}",
+
+            "returns": [],
+
         }), 500
 
     finally:
@@ -3675,7 +4817,7 @@ def admin_get_returns():
 
 
 # ============================================================
-# ADMIN - UPDATE RETURN / ACTUAL RAZORPAY REFUND
+# ADMIN UPDATE RETURN
 # ============================================================
 
 @app.route(
@@ -3689,10 +4831,6 @@ def admin_update_return(return_id):
     cur = None
 
     try:
-
-        # =====================================================
-        # READ REQUEST
-        # =====================================================
 
         data = request.get_json(
             silent=True
@@ -3710,455 +4848,9 @@ def admin_update_return(return_id):
             "admin_note"
         )
 
-        print(
-            "\n======================================"
-        )
-
-        print(
-            "🔄 ADMIN RETURN UPDATE"
-        )
-
-        print(
-            "Return ID:",
-            return_id
-        )
-
-        print(
-            "Return status:",
-            return_status
-        )
-
-        print(
-            "Refund status:",
-            refund_status
-        )
-
-        print(
-            "======================================"
-        )
-
-        # =====================================================
-        # DATABASE
-        # =====================================================
-
-        conn = get_db_connection()
-
-        cur = conn.cursor(
-            dictionary=True
-        )
-
-        # =====================================================
-        # GET RETURN + ORDER + RAZORPAY DETAILS
-        # =====================================================
-
-        cur.execute(
-            """
-            SELECT
-                r.*,
-                o.razorpay_payment_id,
-                o.razorpay_order_id,
-                o.total_amount,
-                o.payment_status
-            FROM return_requests r
-            LEFT JOIN orders o
-                ON o.id = r.order_id
-            WHERE r.id=%s
-            LIMIT 1
-            """,
-            (return_id,)
-        )
-
-        return_item = cur.fetchone()
-
-        if not return_item:
-
-            return jsonify({
-                "success": False,
-                "message":
-                    "Return request not found."
-            }), 404
-
-        # =====================================================
-        # ACTUAL RAZORPAY REFUND
-        # =====================================================
-
-        if refund_status == "Refunded":
-
-            # -------------------------------------------------
-            # PREVENT DUPLICATE REFUND
-            # -------------------------------------------------
-
-            current_refund_status = (
-                return_item.get(
-                    "refund_status"
-                )
-                or "Not Initiated"
-            )
-
-            if current_refund_status == "Refunded":
-
-                return jsonify({
-                    "success": True,
-                    "message":
-                        "This return has already been refunded.",
-                    "refund_status":
-                        "Refunded",
-                    "refund_id":
-                        return_item.get(
-                            "refund_id"
-                        ),
-                    "refund_amount":
-                        float(
-                            return_item.get(
-                                "refund_amount"
-                            ) or 0
-                        ),
-                }), 200
-
-            # -------------------------------------------------
-            # CHECK RAZORPAY CONFIGURATION
-            # -------------------------------------------------
-
-            if not razorpay_client:
-
-                return jsonify({
-                    "success": False,
-                    "message":
-                        "Razorpay is not configured "
-                        "on the backend. Please check "
-                        "RAZORPAY_KEY_ID and "
-                        "RAZORPAY_KEY_SECRET."
-                }), 500
-
-            # -------------------------------------------------
-            # GET PAYMENT ID
-            # -------------------------------------------------
-
-            payment_id = str(
-                return_item.get(
-                    "razorpay_payment_id"
-                )
-                or ""
-            ).strip()
-
-            if not payment_id:
-
-                return jsonify({
-                    "success": False,
-                    "message":
-                        "Razorpay payment ID is missing "
-                        "for this order. The refund "
-                        "cannot be created."
-                }), 400
-
-            # -------------------------------------------------
-            # CHECK OUR DATABASE PAYMENT STATUS
-            # -------------------------------------------------
-
-            payment_status = str(
-                return_item.get(
-                    "payment_status"
-                )
-                or ""
-            ).lower()
-
-            if payment_status not in [
-                "captured",
-                "paid"
-            ]:
-
-                return jsonify({
-                    "success": False,
-                    "message":
-                        "Payment is not eligible for refund. "
-                        f"Current payment status: "
-                        f"{payment_status or 'Unknown'}"
-                }), 400
-
-            # =================================================
-            # FETCH PAYMENT FROM RAZORPAY
-            # =================================================
-
-            try:
-
-                payment = (
-                    razorpay_client.payment.fetch(
-                        payment_id
-                    )
-                )
-
-                razorpay_payment_status = str(
-                    payment.get(
-                        "status",
-                        ""
-                    )
-                ).lower()
-
-                print(
-                    "======================================"
-                )
-
-                print(
-                    "💰 RAZORPAY REFUND REQUEST"
-                )
-
-                print(
-                    "Return ID:",
-                    return_id
-                )
-
-                print(
-                    "Payment ID:",
-                    payment_id
-                )
-
-                print(
-                    "Razorpay payment status:",
-                    razorpay_payment_status
-                )
-
-                print(
-                    "Razorpay amount:",
-                    payment.get(
-                        "amount"
-                    )
-                )
-
-                print(
-                    "======================================"
-                )
-
-                if (
-                    razorpay_payment_status
-                    != "captured"
-                ):
-
-                    return jsonify({
-                        "success": False,
-                        "message":
-                            "Razorpay payment is "
-                            "not captured. "
-                            f"Current status: "
-                            f"{razorpay_payment_status or 'Unknown'}"
-                        
-                    }), 400
-
-            except Exception as payment_error:
-
-                print(
-                    "❌ RAZORPAY PAYMENT FETCH ERROR:",
-                    repr(payment_error)
-                )
-
-                return jsonify({
-                    "success": False,
-                    "message":
-                        "Unable to fetch the "
-                        "Razorpay payment. "
-                        f"{str(payment_error)}"
-                }), 400
-
-            # =================================================
-            # GET PAYMENT AMOUNT
-            # =================================================
-
-            payment_amount_paise = int(
-                payment.get(
-                    "amount"
-                ) or 0
-            )
-
-            if payment_amount_paise <= 0:
-
-                return jsonify({
-                    "success": False,
-                    "message":
-                        "Invalid Razorpay payment amount."
-                }), 400
-
-            # =================================================
-            # CREATE RAZORPAY REFUND
-            # =================================================
-
-            try:
-
-                print(
-                    "💸 Creating Razorpay refund..."
-                )
-
-                print(
-                    "Payment ID:",
-                    payment_id
-                )
-
-                print(
-                    "Amount paise:",
-                    payment_amount_paise
-                )
-
-                refund = (
-                    razorpay_client.payment.refund(
-                        payment_id,
-                        {
-                            "amount":
-                                payment_amount_paise
-                        }
-                    )
-                )
-
-                refund_id = refund.get(
-                    "id"
-                )
-
-                refund_amount = (
-                    payment_amount_paise
-                    / 100
-                )
-
-                print(
-                    "======================================"
-                )
-
-                print(
-                    "✅ RAZORPAY REFUND CREATED"
-                )
-
-                print(
-                    "Refund ID:",
-                    refund_id
-                )
-
-                print(
-                    "Payment ID:",
-                    payment_id
-                )
-
-                print(
-                    "Refund Amount:",
-                    refund_amount
-                )
-
-                print(
-                    "Refund status:",
-                    refund.get(
-                        "status"
-                    )
-                )
-
-                print(
-                    "======================================"
-                )
-
-                # =================================================
-                # UPDATE RETURN AFTER RAZORPAY SUCCESS
-                # =================================================
-
-                update_fields = [
-                    "refund_status=%s",
-                    "refund_id=%s",
-                    "refund_amount=%s"
-                ]
-
-                values = [
-                    "Refunded",
-                    refund_id,
-                    refund_amount
-                ]
-
-                if admin_note is not None:
-
-                    update_fields.append(
-                        "admin_note=%s"
-                    )
-
-                    values.append(
-                        str(
-                            admin_note
-                        ).strip()
-                    )
-
-                values.append(
-                    return_id
-                )
-
-                cur.execute(
-                    f"""
-                    UPDATE return_requests
-                    SET {', '.join(update_fields)}
-                    WHERE id=%s
-                    """,
-                    tuple(values)
-                )
-
-                conn.commit()
-
-                return jsonify({
-                    "success": True,
-                    "message":
-                        "Refund created successfully.",
-                    "refund_status":
-                        "Refunded",
-                    "refund_id":
-                        refund_id,
-                    "refund_amount":
-                        refund_amount
-                }), 200
-
-            except Exception as refund_error:
-
-                print(
-                    "======================================"
-                )
-
-                print(
-                    "❌ RAZORPAY REFUND ERROR"
-                )
-
-                print(
-                    repr(refund_error)
-                )
-
-                print(
-                    "======================================"
-                )
-
-                # ---------------------------------------------
-                # SAVE FAILED STATUS
-                # ---------------------------------------------
-
-                cur.execute(
-                    """
-                    UPDATE return_requests
-                    SET refund_status=%s
-                    WHERE id=%s
-                    """,
-                    (
-                        "Failed",
-                        return_id
-                    )
-                )
-
-                conn.commit()
-
-                return jsonify({
-                    "success": False,
-                    "message":
-                        "Razorpay refund failed: "
-                        f"{str(refund_error)}",
-                    "refund_status":
-                        "Failed"
-                }), 400
-
-        # =====================================================
-        # NORMAL STATUS UPDATE
-        # =====================================================
-
         update_fields = []
-        values = []
 
-        # -----------------------------------------------------
-        # RETURN STATUS
-        # -----------------------------------------------------
+        values = []
 
         if return_status:
 
@@ -4167,32 +4859,22 @@ def admin_update_return(return_id):
             )
 
             values.append(
-                return_status
+                str(
+                    return_status
+                ).strip()
             )
 
-        # -----------------------------------------------------
-        # REFUND STATUS
-        # -----------------------------------------------------
-        #
-        # "Refunded" is handled above.
-        #
-
-        if (
-            refund_status
-            and refund_status != "Refunded"
-        ):
+        if refund_status:
 
             update_fields.append(
                 "refund_status=%s"
             )
 
             values.append(
-                refund_status
+                str(
+                    refund_status
+                ).strip()
             )
-
-        # -----------------------------------------------------
-        # ADMIN NOTE
-        # -----------------------------------------------------
 
         if admin_note is not None:
 
@@ -4206,38 +4888,461 @@ def admin_update_return(return_id):
                 ).strip()
             )
 
-        # -----------------------------------------------------
-        # NOTHING TO UPDATE
-        # -----------------------------------------------------
-
         if not update_fields:
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "Nothing to update"
+                    "Nothing to update",
+
             }), 400
 
         values.append(
             return_id
         )
 
+        conn = get_db_connection()
+
+        cur = conn.cursor()
+
         cur.execute(
             f"""
             UPDATE return_requests
-            SET {', '.join(update_fields)}
+
+            SET
+                {', '.join(update_fields)}
+
             WHERE id=%s
             """,
             tuple(values)
         )
 
+        if cur.rowcount == 0:
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    "Return request not found",
+
+            }), 404
+
         conn.commit()
 
         return jsonify({
+
             "success": True,
+
             "message":
-                "Return request updated successfully."
-        }), 200
+                "Return request updated successfully",
+
+        })
+
+    finally:
+
+        if cur:
+            cur.close()
+
+        if conn:
+            conn.close()
+
+
+# ============================================================
+# ADMIN PROCESS RAZORPAY REFUND
+# ============================================================
+
+@app.route(
+    "/api/admin/returns/<int:return_id>/refund",
+    methods=["POST", "PUT"]
+)
+@admin_required
+def admin_process_refund(return_id):
+
+    conn = None
+    cur = None
+
+    try:
+
+        if not razorpay_client:
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    "Razorpay is not configured.",
+
+            }), 500
+
+        conn = get_db_connection()
+
+        cur = conn.cursor(
+            dictionary=True
+        )
+
+        # ====================================================
+        # GET RETURN + ORDER
+        # ====================================================
+
+        cur.execute(
+            """
+            SELECT
+
+                r.*,
+
+                o.razorpay_payment_id,
+
+                o.payment_status,
+
+                o.order_number AS db_order_number,
+
+                o.total_amount AS order_total
+
+            FROM return_requests r
+
+            LEFT JOIN orders o
+                ON o.id = r.order_id
+
+            WHERE r.id=%s
+
+            LIMIT 1
+            """,
+            (return_id,)
+        )
+
+        return_item = cur.fetchone()
+
+        if not return_item:
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    "Return request not found.",
+
+            }), 404
+
+        # ====================================================
+        # PREVENT DUPLICATE REFUND
+        # ====================================================
+
+        if (
+            return_item.get(
+                "refund_status"
+            ) == "Refunded"
+        ):
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    "This return has already been refunded.",
+
+                "refund_id":
+                    return_item.get(
+                        "refund_id"
+                    ),
+
+            }), 400
+
+        payment_id = str(
+            return_item.get(
+                "razorpay_payment_id"
+            ) or ""
+        ).strip()
+
+        if not payment_id:
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    "No Razorpay payment ID is linked to this order.",
+
+            }), 400
+
+        # ====================================================
+        # CHECK DATABASE PAYMENT STATUS
+        # ====================================================
+
+        db_payment_status = str(
+            return_item.get(
+                "payment_status"
+            ) or ""
+        ).lower()
+
+        if db_payment_status not in [
+            "captured",
+            "paid",
+            "success",
+            "successful",
+        ]:
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    f"Database payment status is '{db_payment_status or 'Unknown'}'. Refund cannot be processed.",
+
+            }), 400
+
+        # ====================================================
+        # FETCH RAZORPAY PAYMENT
+        # ====================================================
+
+        try:
+
+            razorpay_payment = (
+                razorpay_client.payment.fetch(
+                    payment_id
+                )
+            )
+
+        except Exception as razorpay_fetch_error:
+
+            print(
+                "❌ RAZORPAY PAYMENT FETCH ERROR:",
+                razorpay_fetch_error
+            )
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    f"Unable to fetch Razorpay payment: {str(razorpay_fetch_error)}",
+
+            }), 400
+
+        razorpay_payment_status = str(
+            razorpay_payment.get(
+                "status",
+                ""
+            )
+        ).lower()
+
+        if razorpay_payment_status != "captured":
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    f"Razorpay payment status is '{razorpay_payment_status or 'Unknown'}'. Only captured payments can be refunded.",
+
+            }), 400
+
+        # ====================================================
+        # DETERMINE REFUND AMOUNT
+        #
+        # If frontend sends amount, use it.
+        # Otherwise use full captured payment.
+        # ====================================================
+
+        data = request.get_json(
+            silent=True
+        ) or {}
+
+        requested_refund_amount = data.get(
+            "refund_amount"
+        )
+
+        payment_amount_paise = int(
+            razorpay_payment.get(
+                "amount",
+                0
+            )
+        )
+
+        if requested_refund_amount is not None:
+
+            try:
+
+                refund_amount_rupees = float(
+                    requested_refund_amount
+                )
+
+            except (
+                ValueError,
+                TypeError
+            ):
+
+                return jsonify({
+
+                    "success": False,
+
+                    "message":
+                        "Invalid refund amount.",
+
+                }), 400
+
+            refund_amount_paise = int(
+                round(
+                    refund_amount_rupees
+                    * 100
+                )
+            )
+
+        else:
+
+            refund_amount_paise = (
+                payment_amount_paise
+            )
+
+            refund_amount_rupees = (
+                refund_amount_paise
+                / 100
+            )
+
+        if refund_amount_paise <= 0:
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    "Refund amount must be greater than zero.",
+
+            }), 400
+
+        if (
+            refund_amount_paise
+            > payment_amount_paise
+        ):
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    "Refund amount cannot exceed the captured payment amount.",
+
+            }), 400
+
+        # ====================================================
+        # CREATE RAZORPAY REFUND
+        # ====================================================
+
+        try:
+
+            refund = (
+                razorpay_client.payment.refund(
+                    payment_id,
+                    {
+                        "amount":
+                            refund_amount_paise,
+                    }
+                )
+            )
+
+        except Exception as refund_error:
+
+            print(
+                "❌ RAZORPAY REFUND ERROR:",
+                refund_error
+            )
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    f"Razorpay refund failed: {str(refund_error)}",
+
+            }), 400
+
+        refund_id = refund.get(
+            "id"
+        )
+
+        # ====================================================
+        # SAVE REFUND
+        # ====================================================
+
+        cur.execute(
+            """
+            UPDATE return_requests
+
+            SET
+
+                refund_status='Refunded',
+
+                return_status='Refunded',
+
+                refund_id=%s,
+
+                refund_amount=%s
+
+            WHERE id=%s
+            """,
+            (
+                refund_id,
+
+                refund_amount_rupees,
+
+                return_id,
+            )
+        )
+
+        conn.commit()
+
+        print(
+            "======================================"
+        )
+
+        print(
+            "✅ REFUND SUCCESSFUL"
+        )
+
+        print(
+            "Return ID:",
+            return_id
+        )
+
+        print(
+            "Refund ID:",
+            refund_id
+        )
+
+        print(
+            "Refund Amount:",
+            refund_amount_rupees
+        )
+
+        print(
+            "======================================"
+        )
+
+        return jsonify({
+
+            "success": True,
+
+            "message":
+                "Refund processed successfully.",
+
+            "return_id":
+                return_id,
+
+            "refund_id":
+                refund_id,
+
+            "refund_amount":
+                refund_amount_rupees,
+
+            "refund_status":
+                "Refunded",
+
+            "return_status":
+                "Refunded",
+
+        })
 
     except Exception as e:
 
@@ -4245,7 +5350,7 @@ def admin_update_return(return_id):
             conn.rollback()
 
         print(
-            "❌ ADMIN RETURN UPDATE ERROR:",
+            "❌ ADMIN REFUND ERROR:",
             repr(e)
         )
 
@@ -4254,9 +5359,15 @@ def admin_update_return(return_id):
         traceback.print_exc()
 
         return jsonify({
+
             "success": False,
-            "message": str(e),
-            "error": str(e)
+
+            "message":
+                f"Failed to process refund: {str(e)}",
+
+            "error":
+                str(e),
+
         }), 500
 
     finally:
@@ -4269,7 +5380,7 @@ def admin_update_return(return_id):
 
 
 # ============================================================
-# TRACK ORDER - PUBLIC
+# TRACK ORDER
 # ============================================================
 
 @app.route(
@@ -4293,6 +5404,7 @@ def track_order(order_number):
             """
             SELECT *
             FROM orders
+
             WHERE order_number=%s
             """,
             (
@@ -4305,18 +5417,28 @@ def track_order(order_number):
         if not order:
 
             return jsonify({
+
                 "success": False,
+
                 "message":
-                    "Order not found"
+                    "Order not found",
+
             }), 404
 
         datetime_fields = [
+
             "created_at",
+
             "confirmed_at",
+
             "shipped_at",
+
             "out_for_delivery_at",
+
             "delivered_at",
-            "received_at"
+
+            "received_at",
+
         ]
 
         for field in datetime_fields:
@@ -4337,20 +5459,9 @@ def track_order(order_number):
             )
         )
 
-        if isinstance(
-            order.get("items"),
-            str
-        ):
-
-            try:
-
-                order["items"] = json.loads(
-                    order["items"]
-                )
-
-            except Exception:
-
-                order["items"] = []
+        order["items"] = parse_order_items(
+            order.get("items")
+        )
 
         order[
             "total_amount"
@@ -4360,11 +5471,9 @@ def track_order(order_number):
             ) or 0
         )
 
-        order[
-            "total"
-        ] = order[
-            "total_amount"
-        ]
+        order["total"] = (
+            order["total_amount"]
+        )
 
         order.pop(
             "customer_access_token",
@@ -4372,8 +5481,11 @@ def track_order(order_number):
         )
 
         return jsonify({
+
             "success": True,
-            "order": order
+
+            "order": order,
+
         })
 
     finally:
@@ -4411,6 +5523,11 @@ if __name__ == "__main__":
     print(
         "Razorpay configured:",
         bool(razorpay_client)
+    )
+
+    print(
+        "Database:",
+        DB_NAME
     )
 
     print(
