@@ -3939,8 +3939,8 @@ def admin_update_return(return_id):
                             "Razorpay payment is "
                             "not captured. "
                             f"Current status: "
-                            f"{razorpay_payment_status "
-                            "or 'Unknown'}"
+                            f"{razorpay_payment_status or 'Unknown'}"
+                        
                     }), 400
 
             except Exception as payment_error:
