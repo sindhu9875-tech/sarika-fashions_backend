@@ -1257,52 +1257,212 @@ def confirm_order_received_legacy(order_id):
 def create_return_request():
     conn = None
     cur = None
+
     try:
-        customer_token = get_customer_order_token()
+        # =====================================================
+        # GET CUSTOMER TOKEN
+        # =====================================================
+
+        # Prefer the token explicitly sent by the frontend.
+        # This prevents an old Flask-session token from being used.
+        authorization = request.headers.get("Authorization", "").strip()
+        header_token = request.headers.get("X-Customer-Order-Token", "").strip()
+
+        customer_token = None
+
+        if authorization.lower().startswith("bearer "):
+            customer_token = authorization[7:].strip()
+
+        if not customer_token and header_token:
+            customer_token = header_token
+
         if not customer_token:
-            return jsonify({"success": False, "message": "Customer order session not found."}), 401
+            customer_token = get_customer_order_token()
+
+        print("\n======================================")
+        print("↩️ RETURN REQUEST")
+        print("Customer token exists:", bool(customer_token))
+        print("======================================")
+
+        if not customer_token:
+            return jsonify({
+                "success": False,
+                "message": "Customer order session not found."
+            }), 401
+
+        # =====================================================
+        # READ REQUEST DATA
+        # =====================================================
 
         data = request.get_json(silent=True) or {}
-        order_id = data.get("order_id")
-        order_number = str(data.get("order_number", "")).strip().upper()
-        product_id = data.get("product_id")
-        product_name = str(data.get("product_name", "")).strip()
-        quantity = int(data.get("quantity", 1) or 1)
-        reason = str(data.get("reason", "")).strip()
-        description = str(data.get("description", "")).strip()
 
-        if not order_id or not product_name or not reason:
-            return jsonify({"success": False, "message": "Order ID, product name, and reason are required"}), 400
+        print("Return data:", data)
+
+        order_id = data.get("order_id")
+
+        order_number = str(
+            data.get("order_number", "")
+        ).strip().upper()
+
+        product_id = data.get("product_id")
+
+        product_name = str(
+            data.get("product_name", "")
+        ).strip()
+
+        try:
+            quantity = int(data.get("quantity", 1) or 1)
+        except (ValueError, TypeError):
+            quantity = 1
+
+        reason = str(
+            data.get("reason", "")
+        ).strip()
+
+        description = str(
+            data.get("description", "")
+        ).strip()
+
+        # =====================================================
+        # VALIDATION
+        # =====================================================
+
+        if not order_id:
+            return jsonify({
+                "success": False,
+                "message": "Order ID is required."
+            }), 400
+
+        if not product_name:
+            return jsonify({
+                "success": False,
+                "message": "Product name is required."
+            }), 400
+
+        if not reason:
+            return jsonify({
+                "success": False,
+                "message": "Return reason is required."
+            }), 400
+
+        # =====================================================
+        # DATABASE CONNECTION
+        # =====================================================
 
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
 
+        # =====================================================
+        # VERIFY CUSTOMER OWNS THE ORDER
+        # =====================================================
+
         cur.execute(
-            "SELECT * FROM orders WHERE id=%s AND customer_access_token=%s",
+            """
+            SELECT
+                id,
+                order_number,
+                customer_access_token
+            FROM orders
+            WHERE id=%s
+              AND customer_access_token=%s
+            LIMIT 1
+            """,
             (order_id, customer_token)
         )
+
         order = cur.fetchone()
+
+        print("Order ID:", order_id)
+        print("Order found:", bool(order))
+
         if not order:
-            return jsonify({"success": False, "message": "Order not found."}), 404
+            print("❌ RETURN FAILED: order/token mismatch")
+
+            return jsonify({
+                "success": False,
+                "message": "Order not found or customer access token is invalid."
+            }), 404
+
+        # =====================================================
+        # INSERT RETURN REQUEST
+        # =====================================================
 
         cur.execute(
             """
             INSERT INTO return_requests (
-                order_id, order_number, product_id, product_name,
-                quantity, customer_access_token, reason, description,
-                return_status, refund_status
+                order_id,
+                order_number,
+                product_id,
+                product_name,
+                quantity,
+                customer_access_token,
+                reason,
+                description,
+                return_status,
+                refund_status
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Return Requested', 'Not Initiated')
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                'Return Requested',
+                'Not Initiated'
+            )
             """,
-            (order["id"], order.get("order_number") or order_number, product_id, product_name, quantity, customer_token, reason, description)
+            (
+                order["id"],
+                order.get("order_number") or order_number,
+                product_id,
+                product_name,
+                quantity,
+                customer_token,
+                reason,
+                description,
+            )
         )
+
         return_id = cur.lastrowid
+
         conn.commit()
 
-        return jsonify({"success": True, "message": "Return request submitted successfully", "return_id": return_id}), 201
+        print("✅ RETURN REQUEST SAVED")
+        print("Return ID:", return_id)
+        print("Order ID:", order["id"])
+        print("Order Number:", order.get("order_number"))
+        print("======================================")
+
+        return jsonify({
+            "success": True,
+            "message": "Return request submitted successfully",
+            "return_id": return_id,
+        }), 201
+
+    except Exception as e:
+
+        if conn:
+            conn.rollback()
+
+        print("❌ RETURN REQUEST ERROR:", repr(e))
+
+        import traceback
+        traceback.print_exc()
+
+        return jsonify({
+            "success": False,
+            "message": f"Failed to submit return request: {str(e)}",
+            "error": str(e),
+        }), 500
+
     finally:
+
         if cur:
             cur.close()
+
         if conn:
             conn.close()
 
